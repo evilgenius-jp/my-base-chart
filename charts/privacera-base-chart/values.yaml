@@ -6,6 +6,31 @@
 # For StatefulSet configurations and examples, see values-statefulset.yaml
 
 # ==========================================
+# 🌍 GLOBAL CONFIGURATION
+# ==========================================
+
+# Global values that can be overridden by parent charts or shared across subcharts
+global:
+  app:
+    name: ""
+    namespace: ""
+    version: ""
+    labels: {}
+    annotations: {}
+  image:
+    hub: ""
+    repository: ""
+    tag: ""
+    pullPolicy: ""
+    pullSecrets: []
+  service:
+    type: ""
+    ports: []
+    annotations: {}
+  resources: {}
+  env: {}
+
+# ==========================================
 # 🎯 HIGH PRIORITY - CORE CONFIGURATION
 # ==========================================
 
