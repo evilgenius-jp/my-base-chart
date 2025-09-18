@@ -1,5 +1,5 @@
-# Helm chart packages
-*.tgz
+# Helm chart packages (allow root level packages for repository)
+# *.tgz
 
 # IDE files
 .vscode/

@@ -1,0 +1,33 @@
+apiVersion: v1
+entries:
+  privacera-base-chart:
+  - annotations:
+      category: Infrastructure
+      licenses: Apache-2.0
+    apiVersion: v2
+    appVersion: 1.0.0
+    created: "2025-09-18T19:40:05.864268+05:30"
+    description: A comprehensive base Helm chart for microservices with built-in observability,
+      security, and scalability features
+    digest: 812814138d59045c5c729b4a68523e65a71f26307f504aab7e831ca54790084a
+    home: https://github.com/evilgenius-jp/my-base-chart
+    icon: https://raw.githubusercontent.com/evilgenius-jp/my-base-chart/main/assets/logo.png
+    keywords:
+    - microservices
+    - base-chart
+    - kubernetes
+    - deployment
+    - statefulset
+    - observability
+    - security
+    maintainers:
+    - email: contact@evilgenius.jp
+      name: EvilGenius Team
+    name: privacera-base-chart
+    sources:
+    - https://github.com/evilgenius-jp/my-base-chart
+    type: application
+    urls:
+    - https://evilgenius-jp.github.io/my-base-chart/privacera-base-chart-1.0.0.tgz
+    version: 1.0.0
+generated: "2025-09-18T19:40:05.856727+05:30"
