@@ -1,0 +1,273 @@
+# =============================================================================
+# TESTING EXAMPLES CONFIGURATION
+# =============================================================================
+# This configuration is designed for testing and validation of the Helm chart.
+# It enables most features to ensure templates render correctly and all 
+# functionality works as expected.
+#
+# Usage for testing:
+#   helm template test-app ./chart -f chart/examples/testing-examples.yaml
+#   helm lint ./chart -f chart/examples/testing-examples.yaml
+#   helm install test-app ./chart -f chart/examples/testing-examples.yaml --dry-run
+# =============================================================================
+
+# Application metadata with all options
+app:
+  name: test-service
+  env: testing
+  namespace: privacera-test
+  version: "0.1.0-test"
+  labels:
+    team: platform
+    service-type: test
+    environment: testing
+  annotations:
+    test.kubernetes.io/managed-by: helm-chart-test
+
+# Image configuration
+image:
+  hub: 404161567772.dkr.ecr.us-east-1.amazonaws.com
+  repository: privacera/test-service
+  tag: test-latest
+  pullPolicy: Always
+  pullSecrets:
+  - name: test-registry-secret
+
+# Test main ConfigMap
+defaultConfigMap:
+  enabled: true
+  name: test-config
+  mountPath: /app/test-config
+  data:
+    test-config.yaml: |
+      test:
+        enabled: true
+        mode: integration
+        timeout: 30s
+
+# Test additional ConfigMaps
+additionalConfigMaps:
+  test-logging:
+    enabled: true
+    mountPath: /app/logging
+    data:
+      logback.xml: |
+        <?xml version="1.0" encoding="UTF-8"?>
+        <configuration>
+          <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+              <pattern>TEST: %msg%n</pattern>
+            </encoder>
+          </appender>
+          <root level="DEBUG">
+            <appender-ref ref="STDOUT" />
+          </root>
+        </configuration>
+
+  test-metrics:
+    enabled: true
+    mountPath: /app/metrics
+    data:
+      metrics.properties: |
+        metrics.enabled=true
+        metrics.interval=5s
+
+# Environment variables
+env:
+  enabled: true
+  variables:
+    TEST_MODE: "true"
+    LOG_LEVEL: "DEBUG"
+    JVM_OPTS: "-Xmx512m -Xms256m"
+
+# Secrets for testing
+secrets:
+  enabled: true
+  data:
+    TEST_SECRET: "dGVzdC1zZWNyZXQtdmFsdWU=" # base64: test-secret-value
+
+# Deployment with most features enabled
+deployment:
+  enabled: true
+  replicaCount: 2
+
+  # Update strategy
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  # Topology spread constraints
+  topologySpreadConstraints:
+    default:
+      enabled: true
+    additional:
+      enabled: true
+      constraints:
+      - maxSkew: 1
+        topologyKey: "topology.kubernetes.io/zone"
+        whenUnsatisfiable: ScheduleAnyway
+
+  # Node selection
+  nodeSelector:
+    kubernetes.io/arch: amd64
+
+  # Security contexts
+  securityContext:
+    enabled: true
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+
+  # Test init containers
+  initContainers:
+  - name: test-init
+    image: busybox:1.35
+    command: [ "echo", "Init container test" ]
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+
+  # Main container
+  mainContainer:
+    containerPort: 8080
+
+    # Additional ports
+    ports:
+    - containerPort: 9090
+      name: metrics
+      protocol: TCP
+
+    # Security context
+    securityContext:
+      enabled: true
+      readOnlyRootFilesystem: false
+      allowPrivilegeEscalation: false
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      capabilities:
+        drop:
+        - ALL
+
+    # Resources
+    resources:
+      enabled: true
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+
+    # Health probes
+    livenessProbe:
+      enabled: true
+      httpGet:
+        path: /health
+        port: 8080
+      initialDelaySeconds: 30
+      periodSeconds: 30
+
+    readinessProbe:
+      enabled: true
+      httpGet:
+        path: /ready
+        port: 8080
+      initialDelaySeconds: 5
+      periodSeconds: 10
+
+    startupProbe:
+      enabled: true
+      httpGet:
+        path: /startup
+        port: 8080
+      failureThreshold: 10
+
+  # Test sidecar containers
+  additionalContainers:
+  - name: test-sidecar
+    image: busybox:1.35
+    command: [ "sleep", "3600" ]
+    volumeMounts:
+    - name: test-logging
+      mountPath: /test-logs
+      readOnly: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+
+# Service configuration
+service:
+  enabled: true
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+  annotations:
+    test.service/annotation: "test-value"
+
+# External service
+externalService:
+  enabled: true
+  type: ClusterIP
+  port: 9090
+  targetPort: 9090
+
+# Service account
+serviceAccount:
+  create: true
+  name: "test-service-sa"
+  annotations:
+    test.serviceaccount/annotation: "test-value"
+
+# Autoscaling
+autoscaling:
+  enabled: true
+  replicaCountMin: 2
+  replicaCountMax: 5
+  cpu:
+    averageUtilization: 80
+  memory:
+    averageUtilization: 80
+
+# Ingress
+ingress:
+  enabled: true
+  internal: true
+  hostname: "test.example.com"
+  path: "/test"
+  pathType: Prefix
+  extraAnnotations:
+    test.ingress/annotation: "test-value"
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+
+# Network Policy
+networkPolicy:
+  enabled: true
+  policyTypes: [ "Ingress", "Egress" ]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: privacera-test
+    ports:
+    - protocol: TCP
+      port: 8080
+  egress:
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
+
+# KEDA (disabled for basic testing)
+scaledobject:
+  enabled: false

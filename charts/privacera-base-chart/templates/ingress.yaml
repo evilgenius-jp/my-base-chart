@@ -1,0 +1,63 @@
+{{- $globalIngress := include "globalIngress" . | fromYaml }}
+{{- $globalApp := include "globalApp" . | fromYaml }}
+{{- if $globalIngress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "fullname" . }}-ingress
+  namespace: {{ $globalApp.namespace }}
+  labels:
+    {{- include "commonLabels" . | nindent 4 }}
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/target-type: ip
+    {{- if .Values.ingress.internal }}
+    alb.ingress.kubernetes.io/scheme: internal
+    {{- else }}
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    {{- end }}
+    {{- if and .Values.ingress.certificate .Values.ingress.certificate.arn }}
+    alb.ingress.kubernetes.io/certificate-arn: {{ tpl .Values.ingress.certificate.arn . }}
+    {{- end }}
+    {{- if and .Values.ingress.group .Values.ingress.group.enabled }}
+    alb.ingress.kubernetes.io/group.name: {{ .Values.ingress.group.name }}
+    {{- end }}
+    {{- with .Values.ingress.extraAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  rules:
+  - host: {{ tpl .Values.ingress.hostname . }}
+    http:
+      paths:
+      - path: {{ .Values.ingress.path }}
+        pathType: {{ .Values.ingress.pathType }}
+        backend:
+          service:
+            name: {{ include "fullname" . }}
+            port:
+              number: {{ .Values.service.port }}
+      {{- range .Values.ingress.extraPaths }}
+      - path: {{ .path }}
+        pathType: {{ .pathType | default "Prefix" }}
+        backend:
+          service:
+            name: {{ include "fullname" $ }}-ext
+            port:
+              number: {{ .port }}
+      {{- end }}
+  {{- range .Values.ingress.extraRules }}
+  - host: {{ tpl .host $ }}
+    http:
+      paths:
+      {{- range .paths }}
+      - path: {{ .path }}
+        pathType: {{ .pathType | default "Prefix" }}
+        backend:
+          service:
+            name: {{ .serviceName }}
+            port:
+              number: {{ .port }}
+      {{- end }}
+  {{- end }}
+{{- end }}

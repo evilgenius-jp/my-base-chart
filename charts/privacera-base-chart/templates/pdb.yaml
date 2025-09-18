@@ -1,0 +1,26 @@
+{{- $globalPDB := include "globalPodDisruptionBudget" . | fromYaml }}
+{{- if $globalPDB.enabled }}
+{{- $globalApp := include "globalApp" . | fromYaml }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "fullname" . }}-pdb
+  namespace: {{ $globalApp.namespace }}
+  labels:
+    {{- include "commonLabels" . | nindent 4 }}
+spec:
+  {{- if $globalPDB.spec }}
+  {{- toYaml $globalPDB.spec | nindent 2 }}
+  {{- else if eq (int .Values.replicaCount) 1 }}
+  maxUnavailable: 1
+  {{- else if eq (int .Values.replicaCount) 2 }}
+  maxUnavailable: 1
+  {{- else if or (eq (int .Values.replicaCount) 3) (eq (int .Values.replicaCount) 4) }}
+  minAvailable: 1
+  {{- else if ge (int .Values.replicaCount) 5 }}
+minAvailable: "70%"
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "selectorLabels" . | nindent 6 }}
+{{- end }}

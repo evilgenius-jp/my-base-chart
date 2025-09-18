@@ -1,0 +1,231 @@
+# =============================================================================
+# MULTI-CONTAINER MICROSERVICE EXAMPLE
+# =============================================================================
+# This example demonstrates a microservice with multiple containers including:
+# - Main application container
+# - Nginx proxy sidecar
+# - Logging sidecar (Fluentd)
+# - Init container for setup
+#
+# This pattern is common in service mesh architectures and observability setups.
+#
+# Usage:
+#   helm install multi-app ./chart -f chart/examples/multi-container-microservice.yaml
+# =============================================================================
+
+# Application metadata
+app:
+  name: payment-service
+  env: staging
+  namespace: privacera
+  version: "1.3.0"
+  labels:
+    team: commerce
+    service-type: api
+    architecture: multi-container
+
+# Container image configuration
+image:
+  hub: 404161567772.dkr.ecr.us-east-1.amazonaws.com
+  repository: privacera/payment-service
+  tag: v1.3.0-staging
+  pullPolicy: IfNotPresent
+  pullSecrets:
+  - name: privacera-registry-secret
+
+# Main application configuration
+defaultConfigMap:
+  enabled: true
+  name: app-config
+  mountPath: /app/config
+  fromFiles:
+    enabled: false
+  data:
+    application.yml: |
+      server:
+        port: 8080
+      payment:
+        processors:
+          stripe:
+            enabled: true
+          paypal:
+            enabled: true
+        timeout: 30s
+      logging:
+        file:
+          name: /app/logs/payment-service.log
+
+# Configuration for sidecars
+additionalConfigMaps:
+  nginx-config:
+    enabled: true
+    mountPath: /etc/nginx/conf.d
+    data:
+      default.conf: |
+        upstream payment_backend {
+          server localhost:8080;
+        }
+        server {
+          listen 80;
+          location / {
+            proxy_pass http://payment_backend;
+            proxy_set_header Host $host;
+          }
+        }
+
+# Environment variables
+env:
+  enabled: true
+  variables:
+    SPRING_PROFILES_ACTIVE: "staging"
+    JVM_OPTS: "-Xmx2g -Xms1g"
+
+# Secrets
+secrets:
+  enabled: true
+  data:
+    PAYMENT_API_KEY: "cGF5bWVudC1hcGkta2V5" # base64 encoded
+
+# Deployment configuration
+deployment:
+  enabled: true
+  replicaCount: 2
+
+  # Security context
+  securityContext:
+    enabled: true
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+
+  # Init container for setup
+  initContainers:
+  - name: setup-logs
+    image: busybox:1.35
+    command: [ "mkdir", "-p", "/app/logs" ]
+    volumeMounts:
+    - name: app-logs
+      mountPath: /app/logs
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+
+  # Main container
+  mainContainer:
+    containerPort: 8080
+
+    securityContext:
+      enabled: true
+      readOnlyRootFilesystem: false
+      allowPrivilegeEscalation: false
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      capabilities:
+        drop:
+        - ALL
+
+    resources:
+      enabled: true
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+      limits:
+        cpu: "2000m"
+        memory: "2Gi"
+
+    livenessProbe:
+      enabled: true
+      httpGet:
+        path: /health
+        port: 8080
+
+    readinessProbe:
+      enabled: true
+      httpGet:
+        path: /ready
+        port: 8080
+
+  # Sidecar containers
+  additionalContainers:
+  - name: nginx-proxy
+    image: nginx:1.21-alpine
+    ports:
+    - containerPort: 80
+      name: http-proxy
+    volumeMounts:
+    - name: nginx-config
+      mountPath: /etc/nginx/conf.d
+      readOnly: true
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+  - name: fluentd-logger
+    image: fluentd:v1.14
+    ports:
+    - containerPort: 24224
+      name: forward
+    volumeMounts:
+    - name: app-logs
+      mountPath: /app/logs
+      readOnly: true
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
+# Service (points to nginx proxy)
+service:
+  enabled: true
+  type: ClusterIP
+  port: 80
+  targetPort: 80
+
+# Service account
+serviceAccount:
+  create: true
+  name: "payment-service-sa"
+
+# Autoscaling
+autoscaling:
+  enabled: true
+  replicaCountMin: 2
+  replicaCountMax: 8
+  cpu:
+    averageUtilization: 70
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+
+# Network policy
+networkPolicy:
+  enabled: true
+  policyTypes: [ "Ingress", "Egress" ]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: privacera
+    ports:
+    - protocol: TCP
+      port: 80
+  egress:
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
+
+# No KEDA for this example
+scaledobject:
+  enabled: false
+
+# No ingress - internal service
+ingress:
+  enabled: false

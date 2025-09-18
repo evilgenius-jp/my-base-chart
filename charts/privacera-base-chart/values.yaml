@@ -1,0 +1,916 @@
+# ==========================================
+# PRIVACERA HELM CHART - DEFAULT VALUES
+# ==========================================
+
+# This file contains default configurations optimized for Deployment workloads (stateless applications).
+# For StatefulSet configurations and examples, see values-statefulset.yaml
+
+# ==========================================
+# 🎯 HIGH PRIORITY - CORE CONFIGURATION
+# ==========================================
+
+# Application Identity
+app:
+  name: "app-name" # Application name used for labels and resource naming
+  namespace: "privacera" # Kubernetes namespace for deployment
+  version: "" # Application version (optional, uses chart appVersion if empty)
+  labels: {} # Additional labels applied to all resources
+  annotations: {} # Additional annotations applied to all resources
+
+# Examples:
+# app:
+#   name: "user-service"           # Used in all resource names (user-service-deployment, user-service-svc)
+#   namespace: "production"        # Deploy to production namespace
+#   version: "v2.1.0"             # Override chart version
+#   labels:
+#     team: "backend"
+#     service-type: "api"
+#     cost-center: "engineering"
+#   annotations:
+#     deployment.kubernetes.io/revision: "3"
+#     monitoring.company.com/alert-channel: "#alerts"
+
+# Container Image
+image:
+  hub: "docker.io" # Container registry URL
+  repository: "nginx" # Image repository name
+  tag: "" # Image tag (uses chart appVersion if empty)
+  pullPolicy: IfNotPresent # Image pull policy (Always, IfNotPresent, Never)
+  pullSecrets: [] # Image pull secrets for private registries
+
+# Examples:
+# image:
+#   hub: "404161567772.dkr.ecr.us-east-1.amazonaws.com"  # AWS ECR registry
+#   repository: "my-company/user-service"                # Company/app repository
+#   tag: "v1.2.3"                                        # Specific version
+#   pullPolicy: Always                                   # Always pull latest for :latest tag
+#   pullSecrets:
+#     - name: ecr-registry-secret                        # AWS ECR credentials
+#     - name: docker-hub-secret                          # Docker Hub credentials
+
+# Workload Type Selection
+deployment:
+  enabled: true # Enable deployment creation
+  annotations: {} # Annotations for deployment metadata
+  labels: {} # Additional labels for deployment
+  updateStrategy:
+    type: RollingUpdate # Deployment strategy type (RollingUpdate, Recreate)
+    rollingUpdate:
+      maxSurge: 1 # Maximum number of pods that can be created above desired replica count
+      maxUnavailable: 1 # Maximum number of pods that can be unavailable during update
+
+# Examples:
+# deployment:
+#   enabled: true
+#   annotations:
+#     deployment.kubernetes.io/revision: "5"
+#     flux.weave.works/automated: "true"
+#   labels:
+#     version: "stable"
+#   updateStrategy:
+#     type: RollingUpdate              # Gradual update (recommended)
+#     rollingUpdate:
+#       maxSurge: 2                    # Allow 2 extra pods during update
+#       maxUnavailable: 0              # Keep all pods running during update
+# # OR for complete replacement:
+# # updateStrategy:
+# #   type: Recreate                   # Stop all pods, then start new ones
+
+# StatefulSet (disabled by default - see values-statefulset.yaml for full configuration)
+statefulset:
+  enabled: false # Disable StatefulSet creation (use deployment by default)
+
+# Examples:
+# statefulset:
+#   enabled: false    # Use Deployment for stateless apps (web services, APIs)
+# # For stateful apps (databases, queues), use values-statefulset.yaml instead
+
+# Replica Configuration
+replicaCount: 1 # Number of pod replicas
+terminationGracePeriodSeconds: 30 # Time to wait for graceful shutdown
+
+# Examples:
+# replicaCount: 3                           # 3 pods for high availability
+# terminationGracePeriodSeconds: 60         # 60 seconds for database connections to close
+# # Production recommendations:
+# # - Web apps: 2-5 replicas
+# # - APIs: 3-10 replicas  
+# # - Background workers: 1-3 replicas
+
+# ==========================================
+# 🔧 MEDIUM PRIORITY - CONTAINER CONFIGURATION
+# ==========================================
+
+# Main Container
+mainContainer:
+  # Container startup
+  command: [] # Override container entrypoint (optional)
+  args: [] # Command arguments (optional)
+
+  # Container ports
+  containerPort: 5959 # Primary port the container listens on
+  ports: [] # Additional ports (optional)
+
+  # Per-container environment
+  envFrom: [] # Environment from ConfigMaps/Secrets specific to this container
+
+  # Container security
+  securityContext:
+    enabled: true # Enable container security context
+    readOnlyRootFilesystem: false # Make root filesystem read-only
+    allowPrivilegeEscalation: false # Allow privilege escalation
+    runAsNonRoot: true # Run as non-root user
+    runAsUser: 1000 # User ID for container
+    runAsGroup: 1000 # Group ID for container
+    capabilities:
+      drop:
+      - ALL # Capabilities to drop
+
+  # Container lifecycle (optional)
+  lifecycle: {} # Lifecycle hooks
+
+# Examples:
+# mainContainer:
+#   command: ["java"]                         # Override entrypoint
+#   args: ["-jar", "/app/service.jar"]       # Command arguments
+#   containerPort: 8080                      # Spring Boot default port
+#   ports:                                   # Additional ports
+#     - containerPort: 9090                  # Metrics port
+#       name: metrics
+#     - containerPort: 8081                  # Management port
+#       name: management
+#   envFrom:                                 # Environment from external sources
+#     - configMapRef:
+#         name: app-env-config
+#     - secretRef:
+#         name: app-secrets
+#   securityContext:
+#     enabled: true
+#     readOnlyRootFilesystem: true           # Security best practice
+#     runAsUser: 1001                        # Non-root user ID
+#     runAsGroup: 1001                       # Non-root group ID
+#   lifecycle:                               # Graceful shutdown hooks
+#     preStop:
+#       exec:
+#         command: ["/bin/sh", "-c", "sleep 10"]
+
+# Resource Management
+resources:
+  enabled: true # Enable resource constraints
+  requests:
+    cpu: "100m" # Minimum CPU required (100 millicores)
+    memory: 2Gi # Minimum memory required
+  limits:
+    memory: 2Gi # Maximum memory usage
+    cpu: "" # Maximum CPU usage - Example: "1000m" (1 core)
+
+# Examples:
+# resources:
+#   enabled: true
+#   requests:                 # Guaranteed resources (for scheduling)
+#     cpu: "500m"            # 500 millicores (0.5 CPU core)
+#     memory: "1Gi"          # 1 GiB RAM
+#   limits:                   # Maximum resources (hard limits)
+#     cpu: "1000m"           # 1 CPU core maximum
+#     memory: "2Gi"          # 2 GiB RAM maximum
+# # Resource sizing guidelines:
+# # - Small service: 100m CPU, 256Mi memory
+# # - Medium service: 500m CPU, 1Gi memory  
+# # - Large service: 1000m CPU, 2Gi memory
+# # - Set limits 2x higher than requests for burst capacity
+
+# Health Checks
+livenessProbe:
+  enabled: false # Enable liveness probe (restarts pod if fails)
+  httpGet:
+    path: /healthcheck/liveness # Health check endpoint path
+    port: 5959 # Port for health check
+  initialDelaySeconds: 30 # Delay before first probe
+  periodSeconds: 30 # Interval between probes
+  timeoutSeconds: 5 # Timeout for each probe
+  successThreshold: 1 # Consecutive successes needed
+  failureThreshold: 3 # Consecutive failures before restart
+
+readinessProbe:
+  enabled: false # Enable readiness probe (removes from service if fails)
+  httpGet:
+    path: /healthcheck/readiness # Health check endpoint path
+    port: 5959 # Port for health check
+  initialDelaySeconds: 5 # Delay before first probe
+  periodSeconds: 10 # Interval between probes
+  timeoutSeconds: 5 # Timeout for each probe
+  successThreshold: 1 # Consecutive successes needed
+  failureThreshold: 3 # Consecutive failures before removal
+
+startupProbe:
+  enabled: false # Enable startup probe (delays other probes until ready)
+  httpGet:
+    path: /healthcheck/startup # Health check endpoint path
+    port: 5959 # Port for health check
+  initialDelaySeconds: 10 # Delay before first probe
+  periodSeconds: 10 # Interval between probes
+  timeoutSeconds: 5 # Timeout for each probe
+  successThreshold: 1 # Consecutive successes needed
+  failureThreshold: 30 # Consecutive failures before restart
+
+# Examples:
+# # HTTP-based health checks (most common):
+# livenessProbe:
+#   enabled: true
+#   httpGet:
+#     path: /actuator/health/liveness     # Spring Boot Actuator endpoint
+#     port: 8080
+#   initialDelaySeconds: 60               # Wait 60s after startup
+#   periodSeconds: 30                     # Check every 30s
+#   failureThreshold: 3                   # Restart after 3 failures
+#
+# readinessProbe:
+#   enabled: true  
+#   httpGet:
+#     path: /actuator/health/readiness    # Spring Boot Actuator endpoint
+#     port: 8080
+#   initialDelaySeconds: 10               # Check after 10s
+#   periodSeconds: 5                      # Check every 5s
+#   failureThreshold: 3                   # Remove from service after 3 failures
+#
+# # Command-based health checks:
+# # livenessProbe:
+# #   exec:
+# #     command: ["pg_isready", "-U", "postgres"]  # PostgreSQL health check
+# #
+# # # TCP-based health checks:
+# # readinessProbe:
+# #   tcpSocket:
+# #     port: 5432                          # Check if port is open
+
+# ==========================================
+# 📂 CONFIGURATION & SECRETS MANAGEMENT
+# ==========================================
+
+# ===========================================
+# CONFIGMAPS CONFIGURATION  
+# ===========================================
+# Unified ConfigMap management supporting both simple and advanced use cases
+
+configMaps:
+
+  # ========================================
+  # SIMPLE CASE - app-config (Reserved Key)
+  # ========================================
+  # Special handling: Direct key-values become properties in a single file
+  app-config:
+    enabled: false # Disabled by default
+    mountPath: "/app/config" # Where config files appear in container  
+    defaultFileName: "application.properties" # Name of the generated properties file
+    annotations: {} # ConfigMap annotations
+    labels: {} # Additional ConfigMap labels
+    # Direct key-value pairs (automatically converted to properties format)
+    # Example properties (uncomment and modify as needed):
+    # app.name: "my-application"
+    # server.port: "8080"
+    # spring.datasource.url: "jdbc:postgresql://postgres:5432/mydb"
+    # logging.level.root: "INFO"
+
+    # Examples of other ConfigMaps (advanced usage):
+    # configMaps:
+    #
+    #   # ========================================
+    #   # ADVANCED CASE - Multiple Property Files
+    #   # ========================================
+    #   database-config:
+    #     enabled: true
+    #     mountPath: "/app/db-config"
+    #     
+    #     propertyFiles:
+    #       "database.properties":
+    #         db.host: "postgres.internal"
+    #         db.port: "5432"
+    #         db.name: "production"
+    #         db.pool.size: "10"
+    #         
+    #       "redis.properties":
+    #         redis.host: "redis.internal"
+    #         redis.port: "6379"
+    #         redis.timeout: "2000"
+    #
+    #   # ========================================
+    #   # MIXED CONTENT - Properties + Other Files
+    #   # ========================================
+    #   app-configs:
+    #     enabled: true
+    #     mountPath: "/app/config"
+    #     
+    #     # Properties files (mergeable across values files)
+    #     propertyFiles:
+    #       "application.properties":
+    #         server.port: "8080"
+    #         management.port: "8081"
+    #         
+    #     # Direct content (replaced entirely per values file)
+    #     data:
+    #       "logback-spring.xml": |
+    #         <?xml version="1.0" encoding="UTF-8"?>
+    #         <configuration>
+    #           <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    #             <encoder>
+    #               <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+    #             </encoder>
+    #           </appender>
+    #           <root level="INFO">
+    #             <appender-ref ref="STDOUT" />
+    #           </root>
+    #         </configuration>
+    #         
+    #       "startup.sh": |
+    #         #!/bin/bash
+    #         echo "Starting application..."
+    #         java -jar /app/app.jar
+    #
+    #   # ========================================
+    #   # FILE-BASED CONFIG - From Chart Directory
+    #   # ========================================
+    #   shared-configs:
+    #     enabled: false
+    #     mountPath: "/shared/config"
+    #     
+    #     fromFiles:
+    #       enabled: true
+    #       path: "configs/shared/*"          # Files from chart/configs/shared/ directory
+    #
+    #   # ========================================
+    #   # NGINX SIDECAR EXAMPLE
+    #   # ========================================
+    #   nginx-config:
+    #     enabled: false
+    #     mountPath: "/etc/nginx/conf.d"
+    #     
+    #     data:
+    #       "default.conf": |
+    #         server {
+    #           listen 80;
+    #           location / {
+    #             proxy_pass http://localhost:8080;
+    #             proxy_set_header Host $host;
+    #             proxy_set_header X-Real-IP $remote_addr;
+    #           }
+    #         }
+
+    # Secrets Management
+secrets:
+  enabled: false # Enable secrets creation and mounting
+  data: {}
+
+# Examples:
+# secrets:
+#   enabled: true
+#   data:
+#     # All values must be base64 encoded
+#     DB_PASSWORD: "bXlzZWNyZXRwYXNzd29yZA=="     # mysecretpassword (base64)
+#     API_KEY: "YWJjZGVmZ2hpams="                 # abcdefghijk (base64)
+#     JWT_SECRET: "c3VwZXJzZWNyZXRqd3Q="          # supersecretjwt (base64)
+# # To encode: echo -n "mysecretpassword" | base64
+# # Secrets are automatically mounted as environment variables
+
+# Environment Variables
+env:
+  enabled: false # Enable environment variables injection
+  variables: {}
+
+# Examples:
+# env:
+#   enabled: true
+#   variables:
+#     SPRING_PROFILES_ACTIVE: "production"    # Spring Boot profile
+#     LOG_LEVEL: "INFO"                       # Application log level
+#     JVM_OPTS: "-Xmx2g -Xms1g"              # Java JVM options
+#     DATABASE_HOST: "postgres.internal"      # Database connection
+#     REDIS_URL: "redis://redis:6379"         # Cache connection
+#     APP_NAME: "user-service"                # Application identifier
+#     PORT: "8080"                            # Server port
+
+# ==========================================
+# 🌐 NETWORKING & SERVICE CONFIGURATION
+# ==========================================
+
+# Kubernetes Service
+service:
+  enabled: true # Enable service creation
+  name: "" # Override service name (defaults to fullname)
+  type: ClusterIP # Service type (ClusterIP, NodePort, LoadBalancer)
+  port: 80 # Service port
+  targetPort: 5959 # Container port to forward to
+  protocol: TCP # Protocol (TCP, UDP, SCTP)
+  ports: [] # Additional service ports (optional)
+  annotations: {} # Service annotations
+  labels: {} # Additional service labels
+
+  # Headless service (disabled by default for Deployments)
+  headless:
+    enabled: false # Disabled by default (not needed for Deployments)
+
+# Examples:
+# service:
+#   enabled: true
+#   type: ClusterIP                       # Internal service (default)
+#   port: 80                              # Service port (what clients connect to)
+#   targetPort: 8080                      # Container port (where app listens)
+#   ports:                                # Multiple ports
+#     - name: metrics
+#       port: 9090
+#       targetPort: 9090
+#     - name: grpc  
+#       port: 9000
+#       targetPort: 9000
+#       protocol: TCP
+#   annotations:
+#     service.beta.kubernetes.io/aws-load-balancer-type: "nlb"  # AWS Network Load Balancer
+# # Service types:
+# # - ClusterIP: Internal only (default)
+# # - NodePort: Accessible on each node's IP
+# # - LoadBalancer: External load balancer (cloud)
+
+# External Service (for multi-service apps)
+externalService:
+  enabled: false # Enable external service creation
+  name: "" # External service name
+  type: ClusterIP # External service type
+  port: 80 # External service port
+  targetPort: 5959 # Target port for external service
+  protocol: TCP # Protocol for external service
+  annotations: {} # External service annotations
+  labels: {} # Additional external service labels
+
+# Examples:
+# externalService:
+#   enabled: true
+#   name: "user-service-external"         # Different service for external access
+#   type: LoadBalancer                    # External load balancer
+#   port: 443                             # HTTPS port
+#   targetPort: 8080                      # Internal app port
+#   annotations:
+#     service.beta.kubernetes.io/aws-load-balancer-ssl-cert: "arn:aws:acm:..."
+#     service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "http"
+
+# Ingress Configuration
+ingress:
+  enabled: false # Enable ingress creation
+
+  # Primary ingress configuration
+  hostname: "chart-example.local" # Primary hostname for ingress
+  path: "/" # Primary path for routing
+  pathType: "Prefix" # Path type (Prefix, Exact, ImplementationSpecific)
+
+  # AWS ALB specific configuration
+  internal: false # Set to true for internal ALB scheme
+  certificate:
+    arn: "" # AWS certificate ARN for HTTPS
+  group:
+    enabled: false # Enable ALB group sharing
+    name: "" # ALB group name
+
+  # Additional configuration
+  extraAnnotations: {} # Extra ingress annotations beyond default ALB annotations
+  extraPaths: [] # Additional paths for the primary host
+  extraRules: [] # Additional ingress rules for different hosts
+
+# Examples:
+# ingress:
+#   enabled: true
+#   hostname: "api.mycompany.com"         # Your domain
+#   path: "/"                             # Root path
+#   pathType: "Prefix"                    # Path matching type
+#   internal: false                       # Internet-facing ALB
+#   certificate:
+#     arn: "arn:aws:acm:us-east-1:123456789012:certificate/12345..."  # HTTPS certificate
+#   group:
+#     enabled: true                       # Share ALB with other services
+#     name: "shared-alb"                  # ALB group name
+#   extraAnnotations:
+#     alb.ingress.kubernetes.io/target-type: "ip"              # Target type
+#     alb.ingress.kubernetes.io/healthcheck-path: "/health"    # Health check path
+#   extraPaths:                           # Additional paths on same host
+#     - path: "/admin"
+#       pathType: "Prefix"
+#       port: 8080
+#   extraRules:                           # Additional hosts
+#     - host: "admin.mycompany.com"
+#       paths:
+#         - path: "/"
+#           pathType: "Prefix"
+#           serviceName: "admin-service"
+#           port: 80
+
+# ==========================================
+# 🔐 SECURITY CONFIGURATION
+# ==========================================
+
+# Pod Security Context
+securityContext:
+  enabled: true # Enable pod security context
+  fsGroup: 200 # File system group ID for volumes
+  runAsNonRoot: true # Run container as non-root user
+  runAsUser: 1000 # User ID to run container as
+  runAsGroup: 1000 # Group ID to run container as
+
+# Examples:
+# securityContext:
+#   enabled: true
+#   fsGroup: 2000                         # Group ownership for mounted volumes
+#   runAsNonRoot: true                    # Security best practice
+#   runAsUser: 1001                       # Application user ID
+#   runAsGroup: 1001                      # Application group ID
+#   seccompProfile:                       # Secure computing mode
+#     type: RuntimeDefault
+#   supplementalGroups: [3000]            # Additional groups
+
+# Service Account
+serviceAccount:
+  enabled: false # Enable service account creation
+  create: true # Create service account if it doesn't exist
+  name: "" # Service account name (generated if empty)
+  annotations: {} # Service account annotations
+
+# Examples:
+# serviceAccount:
+#   enabled: true
+#   create: true
+#   name: "user-service-sa"               # Custom service account name
+#   annotations:
+#     eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/UserServiceRole"  # AWS IRSA
+#     iam.gke.io/gcp-service-account: "user-service@project.iam.gserviceaccount.com"  # GCP Workload Identity
+
+# Network Security
+networkPolicy:
+  enabled: false # Enable network policy creation
+  policyTypes: [ "Ingress", "Egress" ] # Policy types to enforce
+  ingress: [] # Ingress rules
+  egress: [] # Egress rules
+
+# Examples:
+# networkPolicy:
+#   enabled: true
+#   policyTypes: ["Ingress", "Egress"]
+#   ingress:                              # Allow traffic from specific sources
+#     - from:
+#       - namespaceSelector:
+#           matchLabels:
+#             name: "api-gateway"         # Allow from api-gateway namespace
+#       - podSelector:
+#           matchLabels:
+#             app: "frontend"             # Allow from frontend pods
+#       ports:
+#         - protocol: TCP
+#           port: 8080
+#   egress:                               # Allow traffic to specific destinations  
+#     - to:
+#       - podSelector:
+#           matchLabels:
+#             app: "postgres"             # Allow to database
+#       ports:
+#         - protocol: TCP
+#           port: 5432
+#     - to: []                            # Allow DNS queries
+#       ports:
+#         - protocol: UDP
+#           port: 53
+
+# ==========================================
+# 📊 SCALING & HIGH AVAILABILITY
+# ==========================================
+
+# Horizontal Pod Autoscaler
+autoscaling:
+  enabled: false # Enable horizontal pod autoscaling
+  minReplicas: 1 # Minimum number of replicas
+  maxReplicas: 100 # Maximum number of replicas
+  targetCPUUtilizationPercentage: 80 # Target CPU utilization
+  targetMemoryUtilizationPercentage: 80 # Target memory utilization
+
+# Examples:
+# autoscaling:
+#   enabled: true
+#   minReplicas: 2                        # Always keep at least 2 pods
+#   maxReplicas: 20                       # Scale up to 20 pods maximum
+#   targetCPUUtilizationPercentage: 70    # Scale when CPU > 70%
+#   targetMemoryUtilizationPercentage: 80 # Scale when memory > 80%
+#   behavior:                             # Advanced scaling behavior
+#     scaleUp:
+#       stabilizationWindowSeconds: 60    # Wait 60s before scaling up again
+#       policies:
+#         - type: Percent
+#           value: 100                    # Double replicas
+#           periodSeconds: 15
+#     scaleDown:
+#       stabilizationWindowSeconds: 300   # Wait 5min before scaling down
+#       policies:
+#         - type: Percent
+#           value: 50                     # Remove half the pods
+#           periodSeconds: 60
+
+# KEDA ScaledObject (advanced autoscaling)
+scaledobject:
+  enabled: false # Enable KEDA ScaledObject
+  app:
+    type: "Deployment" # Workload type
+    version: "apps/v1" # API version
+    pollingInterval: 30 # Polling interval in seconds
+    cooldownPeriod: 300 # Cooldown period in seconds
+    minReplicaCount: 1 # Minimum replicas
+    maxReplicaCount: 100 # Maximum replicas
+  triggers: [] # KEDA triggers
+
+# Examples:
+# scaledobject:
+#   enabled: true
+#   app:
+#     pollingInterval: 30                 # Check metrics every 30s
+#     cooldownPeriod: 300                 # Wait 5min between scale operations
+#     minReplicaCount: 2                  # Minimum pods
+#     maxReplicaCount: 50                 # Maximum pods
+#   triggers:
+#     - type: kafka                       # Scale based on Kafka lag
+#       metadata:
+#         bootstrapServers: "kafka:9092"
+#         consumerGroup: "user-service-group"
+#         topic: "user-events"
+#         lagThreshold: "100"             # Scale when lag > 100 messages
+#     - type: prometheus                  # Scale based on custom metrics
+#       metadata:
+#         serverAddress: "http://prometheus:9090"
+#         metricName: "http_requests_per_second"
+#         threshold: "100"                # Scale when RPS > 100
+#         query: "sum(rate(http_requests_total[1m]))"
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true # Enable pod disruption budget
+  spec: {} # Custom PDB spec
+
+# Examples:
+# podDisruptionBudget:
+#   enabled: true
+#   spec:
+#     minAvailable: 2                     # Keep at least 2 pods running during disruptions
+#     # OR:
+#     # maxUnavailable: 1                 # Allow at most 1 pod to be unavailable
+#     # maxUnavailable: "50%"             # Allow at most 50% of pods to be unavailable
+
+# ==========================================
+# 🎯 ADVANCED SCHEDULING & PLACEMENT
+# ==========================================
+
+# Pod Distribution
+topologySpreadConstraints:
+  default:
+    enabled: true # Enable default topology spread constraint
+    maxSkew: 1 # Maximum allowed difference in pod count
+    topologyKey: "kubernetes.io/hostname" # Node label key for topology
+    whenUnsatisfiable: ScheduleAnyway # Action when constraint can't be satisfied
+  additional:
+    enabled: false # Enable additional custom constraints
+    constraints: [] # List of additional constraints
+
+# Examples:
+# topologySpreadConstraints:
+#   default:
+#     enabled: true
+#     maxSkew: 1                          # Allow max 1 pod difference between nodes
+#     topologyKey: "kubernetes.io/hostname"  # Spread across different nodes
+#     whenUnsatisfiable: ScheduleAnyway   # Still schedule if can't spread perfectly
+#   additional:
+#     enabled: true
+#     constraints:
+#       - maxSkew: 2                      # Spread across availability zones
+#         topologyKey: "topology.kubernetes.io/zone"
+#         whenUnsatisfiable: DoNotSchedule # Don't schedule if can't spread
+
+# Node Selection
+nodeSelector: {} # Node labels for pod placement
+
+# Examples:
+# nodeSelector:
+#   node.kubernetes.io/instance-type: "m5.large"     # Only schedule on m5.large nodes
+#   environment: "production"                        # Only production nodes
+#   workload-type: "cpu-intensive"                   # Nodes optimized for CPU work
+
+# Tolerations
+tolerations: [] # Pod tolerations for node taints
+
+# Examples:
+# tolerations:
+#   - key: "dedicated"                    # Tolerate dedicated nodes
+#     operator: "Equal" 
+#     value: "database"
+#     effect: "NoSchedule"
+#   - key: "node.kubernetes.io/not-ready" # Tolerate not-ready nodes
+#     operator: "Exists"
+#     effect: "NoExecute"
+#     tolerationSeconds: 300              # Evict after 5 minutes
+
+# Advanced Scheduling
+affinity: {} # Pod affinity/anti-affinity rules
+
+# Examples:
+# affinity:
+#   podAntiAffinity:                      # Don't schedule pods on same node
+#     requiredDuringSchedulingIgnoredDuringExecution:
+#       - labelSelector:
+#           matchExpressions:
+#             - key: app
+#               operator: In
+#               values: ["user-service"]
+#         topologyKey: "kubernetes.io/hostname"
+#   nodeAffinity:                         # Prefer certain nodes
+#     preferredDuringSchedulingIgnoredDuringExecution:
+#       - weight: 100
+#         preference:
+#           matchExpressions:
+#             - key: "node.kubernetes.io/instance-type"
+#               operator: In
+#               values: ["m5.large", "m5.xlarge"]
+
+# ==========================================
+# 🔧 ADVANCED CONTAINER PATTERNS
+# ==========================================
+
+# Init Containers
+initContainers: [] # Init containers for setup tasks
+
+# Examples:
+# initContainers:
+#   - name: wait-for-database             # Wait for database to be ready
+#     image: busybox:1.35
+#     command: ['sh', '-c']
+#     args: ['until nc -z postgres 5432; do sleep 1; done']
+#   - name: migrate-database              # Run database migrations
+#     image: migrate/migrate:v4.15.2
+#     command: ["migrate"]
+#     args: ["-path", "/migrations", "-database", "postgres://...", "up"]
+#     volumeMounts:
+#       - name: migrations
+#         mountPath: /migrations
+#   - name: download-assets               # Download required assets
+#     image: curlimages/curl:7.85.0
+#     command: ["sh", "-c"]
+#     args: ["curl -o /shared/config.json https://config-server/api/config"]
+#     volumeMounts:
+#       - name: shared-data
+#         mountPath: /shared
+
+# Additional Containers (Sidecars)
+additionalContainers: [] # Additional containers (sidecars)
+
+# Examples:
+# additionalContainers:
+#   - name: nginx-proxy                   # Reverse proxy sidecar
+#     image: nginx:1.21-alpine
+#     ports:
+#       - containerPort: 80
+#         name: proxy
+#     volumeMounts:
+#       - name: nginx-config
+#         mountPath: /etc/nginx/conf.d
+#   - name: fluentd-logger                # Log shipping sidecar
+#     image: fluentd:v1.14
+#     env:
+#       - name: FLUENTD_CONF
+#         value: "fluent.conf"
+#     volumeMounts:
+#       - name: app-logs
+#         mountPath: /var/log/app
+#       - name: fluentd-config
+#         mountPath: /fluentd/etc
+#   - name: prometheus-exporter           # Metrics exporter sidecar
+#     image: prom/node-exporter:latest
+#     ports:
+#       - containerPort: 9100
+#         name: metrics
+
+# ==========================================
+# 📈 MONITORING & OBSERVABILITY
+# ==========================================
+
+# Pod Annotations (for monitoring)
+podAnnotations: {}
+
+# Examples:
+# podAnnotations:
+#   prometheus.io/scrape: "true"          # Enable Prometheus scraping
+#   prometheus.io/port: "9090"            # Metrics port
+#   prometheus.io/path: "/metrics"        # Metrics endpoint
+#   datadog.com/logs: '[{"source": "java", "service": "user-service"}]'  # Datadog log config
+#   linkerd.io/inject: "enabled"          # Linkerd service mesh injection
+
+# Pod Labels
+podLabels: {}
+
+# Examples:
+# podLabels:
+#   version: "v1.2.3"                     # Version label for canary deployments
+#   tier: "backend"                       # Application tier
+#   team: "platform"                      # Owning team
+#   cost-center: "engineering"            # Cost allocation
+#   criticality: "high"                   # Business criticality level
+
+# ==========================================
+# 📦 PERSISTENT VOLUME CLAIMS (PVCs)
+# ==========================================
+
+# PVC configurations for persistent storage needs
+# Supports both global and local configuration with merging
+persistentVolumeClaims: {}
+
+# Examples:
+# persistentVolumeClaims:
+#   # Data storage PVC
+#   data-storage:
+#     enabled: true
+#     name: "my-app-data"                 # Optional: custom PVC name (defaults to fullname-data-storage)
+#     size: "20Gi"                        # Storage size request
+#     accessModes:                        # Access modes for the PVC
+#       - "ReadWriteOnce"
+#     storageClass: "gp2"                 # Storage class (optional)
+#     mountPath: "/app/data"              # Where to mount in container
+#     labels:                             # Additional labels for PVC
+#       storage-type: "ssd"
+#       backup-policy: "daily"
+#     annotations:                        # Additional annotations for PVC
+#       volume.beta.kubernetes.io/storage-provisioner: "kubernetes.io/aws-ebs"
+#
+#   # Logs storage PVC  
+#   logs-storage:
+#     enabled: true
+#     size: "5Gi"
+#     accessModes:
+#       - "ReadWriteOnce"
+#     storageClass: "standard"
+#     mountPath: "/var/log/app"
+#     subPath: "logs"                     # Optional: mount specific subpath
+#
+#   # Cache storage PVC
+#   cache-storage:
+#     enabled: false                      # Disabled by default
+#     size: "10Gi"
+#     mountPath: "/app/cache"
+#     storageClass: "fast-ssd"
+#
+#   # Database storage PVC (for StatefulSets, but works with Deployments too)
+#   database-storage:
+#     enabled: true
+#     size: "100Gi"
+#     accessModes:
+#       - "ReadWriteOnce"
+#     storageClass: "io1-ssd"
+#     mountPath: "/var/lib/postgresql/data"
+#     volumeMode: "Filesystem"            # Optional: Filesystem or Block
+#     selector:                           # Optional: label selector for PV
+#       matchLabels:
+#         type: "database"
+
+# Cloud-specific storage class examples:
+# AWS: "gp2", "gp3", "io1", "io2", "sc1", "st1"
+# Azure: "default", "managed-premium", "azurefile"  
+# GCP: "standard", "ssd", "pd-balanced"
+
+# ==========================================
+# 📁 EMPTY DIR VOLUMES
+# ==========================================
+
+# EmptyDir volumes for temporary storage that shares a pod's lifetime
+# Useful for working directories, cache, temporary files, shared data between containers
+emptyDirVolumes: {}
+
+# Examples:
+# emptyDirVolumes:
+#   # Temporary working directory
+#   temp-workdir:
+#     enabled: true
+#     mountPath: "/tmp/work"              # Where to mount in container
+#     medium: ""                          # "" (default), "Memory" for tmpfs
+#     sizeLimit: "1Gi"                    # Optional size limit
+#
+#   # Memory-based cache
+#   mem-cache:
+#     enabled: true
+#     mountPath: "/app/cache"
+#     medium: "Memory"                    # Use tmpfs (RAM-based storage)
+#     sizeLimit: "512Mi"                  # Limit tmpfs size
+#
+#   # Shared directory between init and main containers
+#   shared-config:
+#     enabled: true
+#     mountPath: "/shared/config"
+#     # No sizeLimit = unlimited (within pod resources)
+#
+#   # Log aggregation directory
+#   logs-buffer:
+#     enabled: false                      # Disabled by default
+#     mountPath: "/var/log/buffer"
+#     sizeLimit: "2Gi"
+#
+#   # Download/upload scratch space
+#   scratch-space:
+#     enabled: true
+#     mountPath: "/scratch"
+#     medium: ""                          # Disk-based
+#     sizeLimit: "5Gi"

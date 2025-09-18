@@ -1,0 +1,63 @@
+{{- $globalScaledObject := include "globalScaledObject" . | fromYaml }}
+{{- if $globalScaledObject.enabled }}
+{{- $globalApp := include "globalApp" . | fromYaml }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "fullname" . }}
+  namespace: {{ $globalApp.namespace }}
+  labels:
+    {{- include "commonLabels" . | nindent 4 }}
+  {{- with $globalScaledObject.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  scaleTargetRef:
+    name: {{ include "fullname" . }}
+    apiVersion: {{ $globalScaledObject.app.version }}
+    kind: {{ $globalScaledObject.app.type | default "Deployment" }}
+  pollingInterval: {{ $globalScaledObject.app.pollingInterval }}
+  cooldownPeriod: {{ $globalScaledObject.app.cooldownPeriod }}
+  {{- if $globalScaledObject.app.initialCooldownPeriod }}
+  initialCooldownPeriod: {{ $globalScaledObject.app.initialCooldownPeriod }}
+  {{- end }}
+  idleReplicaCount: {{ $globalScaledObject.app.idleReplicaCount }}
+  minReplicaCount: {{ $globalScaledObject.app.minReplicaCount }}
+  maxReplicaCount: {{ $globalScaledObject.app.maxReplicaCount }}
+  {{- if and $globalScaledObject.app.fallback $globalScaledObject.app.fallback.failureThreshold }}
+  fallback:
+    failureThreshold: {{ $globalScaledObject.app.fallback.failureThreshold }}
+    replicas: {{ $globalScaledObject.app.fallback.replicas }}
+  {{- end }}
+  {{- if and $globalScaledObject.advanced $globalScaledObject.advanced.behavior }}
+  advanced:
+    restoreToOriginalReplicaCount: {{ $globalScaledObject.advanced.restoreToOriginalReplicaCount }}
+    horizontalPodAutoscalerConfig:
+      behavior:
+        {{- if $globalScaledObject.advanced.behavior.scaleDown }}
+        scaleDown:
+          stabilizationWindowSeconds: {{ $globalScaledObject.advanced.behavior.scaleDown.stabilizationWindowSeconds }}
+          policies:
+          {{- range $globalScaledObject.advanced.behavior.scaleDown.policies }}
+          - type: {{ .type }}
+            value: {{ .value }}
+            periodSeconds: {{ .periodSeconds }}
+          {{- end }}
+          selectPolicy: {{ $globalScaledObject.advanced.behavior.scaleDown.selectPolicy }}
+        {{- end }}
+        {{- if $globalScaledObject.advanced.behavior.scaleUp }}
+        scaleUp:
+          stabilizationWindowSeconds: {{ $globalScaledObject.advanced.behavior.scaleUp.stabilizationWindowSeconds }}
+          policies:
+          {{- range $globalScaledObject.advanced.behavior.scaleUp.policies }}
+          - type: {{ .type }}
+            value: {{ .value }}
+            periodSeconds: {{ .periodSeconds }}
+          {{- end }}
+          selectPolicy: {{ $globalScaledObject.advanced.behavior.scaleUp.selectPolicy }}
+        {{- end }}
+  {{- end }}
+  triggers:
+    {{- toYaml $globalScaledObject.triggers | nindent 2 }}
+{{- end }}

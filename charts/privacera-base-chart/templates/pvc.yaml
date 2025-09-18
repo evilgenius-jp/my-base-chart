@@ -1,0 +1,46 @@
+{{/*
+Create PersistentVolumeClaims based on global and local configuration
+*/}}
+{{- $global := dict }}
+{{- if .Values.global }}
+  {{- $global = .Values.global.persistentVolumeClaims | default dict }}
+{{- end }}
+{{- $local := .Values.persistentVolumeClaims | default dict }}
+{{- $merged := merge $local $global }}
+{{- $globalApp := include "globalApp" . | fromYaml }}
+
+{{- range $pvcName, $pvcConfig := $merged }}
+{{- if $pvcConfig.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $pvcConfig.name | default (printf "%s-%s" (include "fullname" $) $pvcName) }}
+  namespace: {{ $globalApp.namespace }}
+  labels:
+    {{- include "commonLabels" $ | nindent 4 }}
+    {{- with $pvcConfig.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with $pvcConfig.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  accessModes:
+    {{- toYaml ($pvcConfig.accessModes | default (list "ReadWriteOnce")) | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ $pvcConfig.size | default "10Gi" }}
+  {{- if $pvcConfig.storageClass }}
+  storageClassName: {{ $pvcConfig.storageClass }}
+  {{- end }}
+  {{- if $pvcConfig.volumeMode }}
+  volumeMode: {{ $pvcConfig.volumeMode }}
+  {{- end }}
+  {{- if $pvcConfig.selector }}
+  selector:
+    {{- toYaml $pvcConfig.selector | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,520 @@
+{{- if .Values.deployment.enabled }}
+{{- $globalApp := include "globalApp" . | fromYaml }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "fullname" . }}
+  namespace: {{ $globalApp.namespace }}
+  labels:
+    {{- include "commonLabels" . | nindent 4 }}
+    {{- with .Values.deployment.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.deployment.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  strategy:
+    type: {{ .Values.deployment.updateStrategy.type }}
+    {{- if eq .Values.deployment.updateStrategy.type "RollingUpdate" }}
+    rollingUpdate:
+      maxSurge: {{ .Values.deployment.updateStrategy.rollingUpdate.maxSurge }}
+      maxUnavailable: {{ .Values.deployment.updateStrategy.rollingUpdate.maxUnavailable }}
+    {{- end }}
+  selector:
+    matchLabels:
+      {{- include "selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "selectorLabels" . | nindent 8 }}
+        {{- with .Values.app.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.app.annotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- include "imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "serviceAccountName" . }}
+      {{- $globalNodeSelector := include "globalNodeSelector" . | fromYaml }}
+      {{- if $globalNodeSelector }}
+      nodeSelector:
+        {{- toYaml $globalNodeSelector | nindent 8 }}
+      {{- end }}
+      {{- $globalTolerations := include "globalTolerations" . }}
+      {{- if $globalTolerations }}
+      tolerations:
+        {{- $globalTolerations | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ include "globalTerminationGracePeriodSeconds" . }}
+      {{- if or .Values.topologySpreadConstraints.default.enabled .Values.topologySpreadConstraints.additional.enabled }}
+      topologySpreadConstraints:
+      {{- if .Values.topologySpreadConstraints.default.enabled }}
+      - maxSkew: {{ .Values.topologySpreadConstraints.default.maxSkew }}
+        topologyKey: {{ .Values.topologySpreadConstraints.default.topologyKey }}
+        whenUnsatisfiable: {{ .Values.topologySpreadConstraints.default.whenUnsatisfiable }}
+        labelSelector:
+          matchLabels:
+            {{- include "selectorLabels" . | nindent 12 }}
+      {{- end }}
+{{- if .Values.topologySpreadConstraints.additional.enabled }}
+{{- range .Values.topologySpreadConstraints.additional.constraints }}
+      - maxSkew: {{ .maxSkew }}
+        topologyKey: {{ .topologyKey }}
+        whenUnsatisfiable: {{ .whenUnsatisfiable }}
+        {{- if .labelSelector }}
+        labelSelector:
+          {{- toYaml .labelSelector | nindent 10 }}
+        {{- else }}
+        labelSelector:
+          matchLabels:
+            {{- include "selectorLabels" $ | nindent 12 }}
+        {{- end }}
+        {{- if .matchLabelKeys }}
+        matchLabelKeys:
+          {{- toYaml .matchLabelKeys | nindent 10 }}
+        {{- end }}
+        {{- if .nodeAffinityPolicy }}
+        nodeAffinityPolicy: {{ .nodeAffinityPolicy }}
+        {{- end }}
+        {{- if .nodeTaintsPolicy }}
+        nodeTaintsPolicy: {{ .nodeTaintsPolicy }}
+        {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- $globalAffinity := include "globalAffinity" . | fromYaml }}
+      {{- if $globalAffinity }}
+      affinity:
+        {{- toYaml $globalAffinity | nindent 8 }}
+      {{- end }}
+      {{- $globalSecurityContext := include "globalSecurityContext" . | fromYaml }}
+      {{- if $globalSecurityContext }}
+      securityContext:
+        {{- toYaml $globalSecurityContext | nindent 8 }}
+      {{- end }}
+      {{- $global := list }}
+      {{- if .Values.global }}
+        {{- $global = .Values.global.initContainers | default list }}
+      {{- end }}
+      {{- $local := .Values.initContainers | default list }}
+      {{- $allInitContainers := concat $global $local }}
+      {{- if $allInitContainers }}
+      initContainers:
+      {{- range $allInitContainers }}
+      - name: {{ .name }}
+        image: {{ .image }}
+        {{- if .imagePullPolicy }}
+        imagePullPolicy: {{ .imagePullPolicy }}
+        {{- end }}
+        {{- if .command }}
+        command:
+          {{- toYaml .command | nindent 10 }}
+        {{- end }}
+        {{- if .args }}
+        args:
+          {{- toYaml .args | nindent 10 }}
+        {{- end }}
+        {{- if .ports }}
+        ports:
+          {{- toYaml .ports | nindent 10 }}
+        {{- end }}
+        {{- if .env }}
+        env:
+          {{- toYaml .env | nindent 10 }}
+        {{- end }}
+        {{- if .envFrom }}
+        envFrom:
+          {{- toYaml .envFrom | nindent 10 }}
+        {{- end }}
+        {{- if .resources }}
+        resources:
+          {{- toYaml .resources | nindent 10 }}
+        {{- end }}
+        {{- if .volumeMounts }}
+        volumeMounts:
+          {{- toYaml .volumeMounts | nindent 10 }}
+        {{- end }}
+        {{- if .securityContext }}
+        securityContext:
+          {{- toYaml .securityContext | nindent 10 }}
+        {{- end }}
+        {{- if .livenessProbe }}
+        livenessProbe:
+          {{- toYaml .livenessProbe | nindent 10 }}
+        {{- end }}
+        {{- if .readinessProbe }}
+        readinessProbe:
+          {{- toYaml .readinessProbe | nindent 10 }}
+        {{- end }}
+        {{- if .startupProbe }}
+        startupProbe:
+          {{- toYaml .startupProbe | nindent 10 }}
+        {{- end }}
+        {{- if .lifecycle }}
+        lifecycle:
+          {{- toYaml .lifecycle | nindent 10 }}
+        {{- end }}
+        {{- if .restartPolicy }}
+        restartPolicy: {{ .restartPolicy }}
+        {{- end }}
+      {{- end }}
+      {{- end }}
+      containers:
+      - name: {{ .Values.app.name }}
+        {{- $globalImage := include "globalImage" . | fromYaml }}
+        image: "{{ $globalImage.hub }}/{{ $globalImage.repository }}:{{ $globalImage.tag }}"
+        imagePullPolicy: {{ $globalImage.pullPolicy }}
+        {{- if .Values.mainContainer.command }}
+        command:
+          {{- toYaml .Values.mainContainer.command | nindent 10 }}
+        {{- end }}
+        {{- if .Values.mainContainer.args }}
+        args:
+          {{- toYaml .Values.mainContainer.args | nindent 10 }}
+        {{- end }}
+        {{- if .Values.mainContainer.securityContext.enabled }}
+        securityContext:
+          {{- with .Values.mainContainer.securityContext }}
+          {{- omit . "enabled" | toYaml | nindent 10 }}
+          {{- end }}
+        {{- end }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.mainContainer.containerPort }}
+          protocol: TCP
+        {{- if .Values.mainContainer.ports }}
+        {{- range .Values.mainContainer.ports }}
+        - containerPort: {{ .containerPort }}
+          {{- if .name }}
+          name: {{ .name }}
+          {{- end }}
+          {{- if .protocol }}
+          protocol: {{ .protocol }}
+          {{- else }}
+          protocol: TCP
+          {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- $globalEnv := include "globalEnv" . }}
+        {{- if $globalEnv }}
+        env:
+        {{- $globalEnv | nindent 8 }}
+        {{- end }}
+        {{- if .Values.mainContainer.envFrom }}
+        envFrom:
+          {{- toYaml .Values.mainContainer.envFrom | nindent 10 }}
+        {{- end }}
+        {{- if .Values.livenessProbe.enabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.livenessProbe.httpGet.path }}
+            port: {{ .Values.livenessProbe.httpGet.port }}
+          initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds }}
+          successThreshold: {{ .Values.livenessProbe.successThreshold }}
+          failureThreshold: {{ .Values.livenessProbe.failureThreshold }}
+        {{- end }}
+        {{- if .Values.readinessProbe.enabled }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.readinessProbe.httpGet.path }}
+            port: {{ .Values.readinessProbe.httpGet.port }}
+          initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.readinessProbe.timeoutSeconds }}
+          successThreshold: {{ .Values.readinessProbe.successThreshold }}
+          failureThreshold: {{ .Values.readinessProbe.failureThreshold }}
+        {{- end }}
+        {{- if .Values.startupProbe.enabled }}
+        startupProbe:
+          httpGet:
+            path: {{ .Values.startupProbe.httpGet.path }}
+            port: {{ .Values.startupProbe.httpGet.port }}
+          initialDelaySeconds: {{ .Values.startupProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.startupProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.startupProbe.timeoutSeconds }}
+          successThreshold: {{ .Values.startupProbe.successThreshold }}
+          failureThreshold: {{ .Values.startupProbe.failureThreshold }}
+        {{- end }}
+        {{- $globalResources := include "globalResources" . | fromYaml }}
+        {{- if $globalResources }}
+        resources:
+          {{- toYaml $globalResources | nindent 10 }}
+        {{- end }}
+        {{- if .Values.mainContainer.lifecycle }}
+        lifecycle:
+          {{- toYaml .Values.mainContainer.lifecycle | nindent 10 }}
+        {{- end }}
+        {{- $global := dict }}
+        {{- if .Values.global }}
+          {{- $global = .Values.global.configMaps | default dict }}
+        {{- end }}
+        {{- $local := .Values.configMaps | default dict }}
+        {{- $merged := dict }}
+        
+        {{/* Start with local configMaps */}}
+        {{- range $name, $config := $local }}
+          {{- $merged = set $merged $name $config }}
+        {{- end }}
+        
+        {{/* Merge global configMaps */}}
+        {{- range $name, $globalConfig := $global }}
+          {{- $localConfig := get $local $name | default dict }}
+          {{- if eq $name "app-config" }}
+            {{/* Deep merge app-config properties */}}
+            {{- $globalProps := omit $globalConfig "enabled" "mountPath" "defaultFileName" "subPath" "labels" "annotations" }}
+            {{- $localProps := omit $localConfig "enabled" "mountPath" "defaultFileName" "subPath" "labels" "annotations" }}
+            {{- $mergedConfig := merge $localConfig $globalConfig }}
+            {{- $mergedConfig = merge $mergedConfig (merge $localProps $globalProps) }}
+            {{- $merged = set $merged $name $mergedConfig }}
+          {{- else if not $localConfig }}
+            {{/* No local conflict - add global configMap */}}
+            {{- $merged = set $merged $name $globalConfig }}
+          {{- end }}
+        {{- end }}
+
+        {{- $hasCMVolumes := false }}
+        {{- $hasPVCVolumes := false }}
+        {{- $hasEmptyDirVolumes := false }}
+        {{- if $merged }}
+          {{- $hasCMVolumes = true }}
+        {{- end }}
+        {{- $globalPVC := dict }}
+        {{- if .Values.global }}
+          {{- $globalPVC = .Values.global.persistentVolumeClaims | default dict }}
+        {{- end }}
+        {{- $localPVC := .Values.persistentVolumeClaims | default dict }}
+        {{- $mergedPVC := merge $localPVC $globalPVC }}
+        {{- if $mergedPVC }}
+          {{- $hasPVCVolumes = true }}
+        {{- end }}
+        {{- $globalEmptyDir := dict }}
+        {{- if .Values.global }}
+          {{- $globalEmptyDir = .Values.global.emptyDirVolumes | default dict }}
+        {{- end }}
+        {{- $localEmptyDir := .Values.emptyDirVolumes | default dict }}
+        {{- $mergedEmptyDir := merge $localEmptyDir $globalEmptyDir }}
+        {{- if $mergedEmptyDir }}
+          {{- $hasEmptyDirVolumes = true }}
+        {{- end }}
+        {{- if or $hasCMVolumes $hasPVCVolumes $hasEmptyDirVolumes }}
+        volumeMounts:
+        {{- if $hasCMVolumes }}
+        {{- range $configName, $config := $merged }}
+        {{- if $config.enabled }}
+        {{- if $config.subPath }}
+          {{- if eq $configName "app-config" }}
+        - name: {{ $configName }}-vol
+          mountPath: {{ $config.mountPath }}/{{ $config.defaultFileName | default "application.properties" }}
+          subPath: {{ $config.defaultFileName | default "application.properties" }}
+          {{- else }}
+            {{- range $fileName, $content := $config.data }}
+        - name: {{ $configName }}-vol
+          mountPath: {{ $config.mountPath }}/{{ $fileName }}
+          subPath: {{ $fileName }}
+            {{- end }}
+          {{- end }}
+        {{- else }}
+        - name: {{ $configName }}-vol
+          mountPath: {{ $config.mountPath }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- if $hasPVCVolumes }}
+        {{- range $pvcName, $pvcConfig := $mergedPVC }}
+        {{- if $pvcConfig.enabled }}
+        - name: {{ $pvcName }}-vol
+          mountPath: {{ $pvcConfig.mountPath }}
+          {{- if $pvcConfig.subPath }}
+          subPath: {{ $pvcConfig.subPath }}
+          {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- if $hasEmptyDirVolumes }}
+        {{- range $emptyDirName, $emptyDirConfig := $mergedEmptyDir }}
+        {{- if $emptyDirConfig.enabled }}
+        - name: {{ $emptyDirName }}-vol
+          mountPath: {{ $emptyDirConfig.mountPath }}
+          {{- if $emptyDirConfig.subPath }}
+          subPath: {{ $emptyDirConfig.subPath }}
+          {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- if .Values.mainContainer.volumeMounts }}
+        {{- range .Values.mainContainer.volumeMounts }}
+        - name: {{ .name }}
+          mountPath: {{ .mountPath }}
+          {{- if .subPath }}
+          subPath: {{ .subPath }}
+          {{- end }}
+          {{- if .readOnly }}
+          readOnly: {{ .readOnly }}
+          {{- end }}
+        {{- end }}
+        {{- end }}
+      {{- $global := list }}
+      {{- if .Values.global }}
+        {{- $global = .Values.global.additionalContainers | default list }}
+      {{- end }}
+      {{- $local := .Values.additionalContainers | default list }}
+      {{- $allAdditionalContainers := concat $global $local }}
+      {{- if $allAdditionalContainers }}
+      {{- range $allAdditionalContainers }}
+      - name: {{ .name }}
+        image: {{ .image }}
+        {{- if .imagePullPolicy }}
+        imagePullPolicy: {{ .imagePullPolicy }}
+        {{- end }}
+        {{- if .command }}
+        command:
+          {{- toYaml .command | nindent 10 }}
+        {{- end }}
+        {{- if .args }}
+        args:
+          {{- toYaml .args | nindent 10 }}
+        {{- end }}
+        {{- if .ports }}
+        ports:
+          {{- toYaml .ports | nindent 10 }}
+        {{- end }}
+        {{- if .env }}
+        env:
+          {{- toYaml .env | nindent 10 }}
+        {{- end }}
+        {{- if .envFrom }}
+        envFrom:
+          {{- toYaml .envFrom | nindent 10 }}
+        {{- end }}
+        {{- if .resources }}
+        resources:
+          {{- toYaml .resources | nindent 10 }}
+        {{- end }}
+        {{- if .volumeMounts }}
+        volumeMounts:
+          {{- toYaml .volumeMounts | nindent 10 }}
+        {{- end }}
+        {{- if .securityContext }}
+        securityContext:
+          {{- toYaml .securityContext | nindent 10 }}
+        {{- end }}
+        {{- if .livenessProbe }}
+        livenessProbe:
+          {{- toYaml .livenessProbe | nindent 10 }}
+        {{- end }}
+        {{- if .readinessProbe }}
+        readinessProbe:
+          {{- toYaml .readinessProbe | nindent 10 }}
+        {{- end }}
+        {{- if .startupProbe }}
+        startupProbe:
+          {{- toYaml .startupProbe | nindent 10 }}
+        {{- end }}
+        {{- if .lifecycle }}
+        lifecycle:
+          {{- toYaml .lifecycle | nindent 10 }}
+        {{- end }}
+      {{- end }}
+      {{- end }}
+      restartPolicy: Always
+      {{- $hasCMVolumes := false }}
+      {{- $hasPVCVolumes := false }}
+      {{- $hasEmptyDirVolumes := false }}
+      {{- if $merged }}
+        {{- $hasCMVolumes = true }}
+      {{- end }}
+      {{- $globalPVC := dict }}
+      {{- if .Values.global }}
+        {{- $globalPVC = .Values.global.persistentVolumeClaims | default dict }}
+      {{- end }}
+      {{- $localPVC := .Values.persistentVolumeClaims | default dict }}
+      {{- $mergedPVC := merge $localPVC $globalPVC }}
+      {{- if $mergedPVC }}
+        {{- $hasPVCVolumes = true }}
+      {{- end }}
+      {{- $globalEmptyDir := dict }}
+      {{- if .Values.global }}
+        {{- $globalEmptyDir = .Values.global.emptyDirVolumes | default dict }}
+      {{- end }}
+      {{- $localEmptyDir := .Values.emptyDirVolumes | default dict }}
+      {{- $mergedEmptyDir := merge $localEmptyDir $globalEmptyDir }}
+      {{- if $mergedEmptyDir }}
+        {{- $hasEmptyDirVolumes = true }}
+      {{- end }}
+      {{- if or $hasCMVolumes $hasPVCVolumes $hasEmptyDirVolumes }}
+      volumes:
+      {{- if $hasCMVolumes }}
+      {{- range $configName, $config := $merged }}
+      {{- if $config.enabled }}
+      - name: {{ $configName }}-vol
+        configMap:
+          name: {{ include "fullname" $ }}-{{ $configName }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- if $hasPVCVolumes }}
+      {{- range $pvcName, $pvcConfig := $mergedPVC }}
+      {{- if $pvcConfig.enabled }}
+      - name: {{ $pvcName }}-vol
+        persistentVolumeClaim:
+          claimName: {{ $pvcConfig.name | default (printf "%s-%s" (include "fullname" $) $pvcName) }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- if $hasEmptyDirVolumes }}
+      {{- range $emptyDirName, $emptyDirConfig := $mergedEmptyDir }}
+      {{- if $emptyDirConfig.enabled }}
+      - name: {{ $emptyDirName }}-vol
+        emptyDir:
+          {{- if $emptyDirConfig.medium }}
+          medium: {{ $emptyDirConfig.medium }}
+          {{- end }}
+          {{- if $emptyDirConfig.sizeLimit }}
+          sizeLimit: {{ $emptyDirConfig.sizeLimit }}
+          {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- if .Values.volumes }}
+      {{- range .Values.volumes }}
+      - name: {{ .name }}
+        {{- if .secret }}
+        secret:
+          secretName: {{ .secret.secretName }}
+          {{- if .secret.defaultMode }}
+          defaultMode: {{ .secret.defaultMode }}
+          {{- end }}
+        {{- else if .emptyDir }}
+        emptyDir:
+          {{- if .emptyDir.medium }}
+          medium: {{ .emptyDir.medium }}
+          {{- end }}
+          {{- if .emptyDir.sizeLimit }}
+          sizeLimit: {{ .emptyDir.sizeLimit }}
+          {{- end }}
+        {{- else if .configMap }}
+        configMap:
+          name: {{ .configMap.name }}
+          {{- if .configMap.defaultMode }}
+          defaultMode: {{ .configMap.defaultMode }}
+          {{- end }}
+        {{- else if .persistentVolumeClaim }}
+        persistentVolumeClaim:
+          claimName: {{ .persistentVolumeClaim.claimName }}
+        {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
+{{- end }}
+

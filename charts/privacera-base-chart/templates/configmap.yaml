@@ -1,0 +1,81 @@
+{{/*
+Unified ConfigMaps Template
+Supports both simple (app-config) and advanced (other keys) configurations
+Includes global configMaps merging
+*/}}
+{{- $global := dict }}
+{{- if .Values.global }}
+  {{- $global = .Values.global.configMaps | default dict }}
+{{- end }}
+{{- $local := .Values.configMaps | default dict }}
+{{- $merged := dict }}
+
+{{/* Start with local configMaps */}}
+{{- range $name, $config := $local }}
+  {{- $merged := set $merged $name $config }}
+{{- end }}
+
+{{/* Merge global configMaps */}}
+{{- range $name, $globalConfig := $global }}
+  {{- $localConfig := get $local $name | default dict }}
+  {{- if eq $name "app-config" }}
+    {{/* Deep merge app-config properties */}}
+    {{- $globalProps := omit $globalConfig "enabled" "mountPath" "defaultFileName" "subPath" "labels" "annotations" }}
+    {{- $localProps := omit $localConfig "enabled" "mountPath" "defaultFileName" "subPath" "labels" "annotations" }}
+    {{- $mergedConfig := merge $localConfig $globalConfig }}
+    {{- $mergedConfig := merge $mergedConfig (merge $localProps $globalProps) }}
+    {{- $merged := set $merged $name $mergedConfig }}
+  {{- else if not $localConfig }}
+    {{/* No local conflict - add global configMap */}}
+    {{- $merged := set $merged $name $globalConfig }}
+  {{- end }}
+{{- end }}
+
+{{- if $merged }}
+{{- range $configName, $config := $merged }}
+{{- if $config.enabled }}
+{{- $globalApp := include "globalApp" $ | fromYaml }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "fullname" $ }}-{{ $configName }}
+  namespace: {{ $globalApp.namespace }}
+  labels:
+    {{- include "commonLabels" $ | nindent 4 }}
+    {{- with $config.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with $config.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+{{- if eq $configName "app-config" }}
+  {{/* Special handling for app-config: simple key-value → properties */}}
+  {{ $config.defaultFileName | default "application.properties" }}: |
+{{ include "toProperties" (dict "data" (omit $config "enabled" "mountPath" "defaultFileName" "subPath" "labels" "annotations") "root" $) | indent 4 }}
+{{- else }}
+  {{/* Advanced handling for other configs */}}
+  {{- if $config.propertyFiles }}
+    {{- range $fileName, $properties := $config.propertyFiles }}
+  {{ $fileName }}: |
+{{ include "toProperties" (dict "data" $properties "root" $) | indent 4 }}
+    {{- end }}
+  {{- end }}
+  {{- if $config.data }}
+    {{- range $fileName, $content := $config.data }}
+  {{ $fileName }}: |
+{{ $content | indent 4 }}
+    {{- end }}
+  {{- end }}
+  {{- if and $config.fromFiles $config.fromFiles.enabled }}
+    {{- range $path, $content := $.Files.Glob $config.fromFiles.path }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,188 @@
+# =============================================================================
+# BASIC MICROSERVICE EXAMPLE
+# =============================================================================
+# This example demonstrates a minimal microservice configuration suitable for
+# development and simple production workloads.
+#
+# Features demonstrated:
+# - Basic deployment with 2 replicas
+# - Service configuration
+# - Basic security context
+# - Resource limits
+# - Health checks
+# - ConfigMap for application configuration
+#
+# Usage:
+#   helm install basic-app ./chart -f chart/examples/basic-microservice.yaml
+# =============================================================================
+
+# Application metadata
+app:
+  name: user-service
+  env: development
+  namespace: privacera
+  labels:
+    team: backend
+    service-type: api
+
+# Container image configuration
+image:
+  hub: 404161567772.dkr.ecr.us-east-1.amazonaws.com
+  repository: privacera/user-service
+  tag: v1.2.0
+  pullPolicy: IfNotPresent
+
+# Main application configuration (auto-mounted to main container)
+defaultConfigMap:
+  enabled: true
+  name: app-config
+  mountPath: /app/config
+  fromFiles:
+    enabled: false
+  data:
+    application.yml: |
+      server:
+        port: 8080
+        servlet:
+          context-path: /api/v1
+      spring:
+        profiles:
+          active: ${SPRING_PROFILES_ACTIVE:development}
+        datasource:
+          url: jdbc:postgresql://postgres:5432/userdb
+          username: ${DB_USER:userservice}
+          password: ${DB_PASSWORD:changeme}
+        jpa:
+          hibernate:
+            ddl-auto: validate
+          show-sql: false
+      logging:
+        level:
+          com.privacera.userservice: INFO
+          org.springframework.web: WARN
+
+# Environment variables
+env:
+  enabled: true
+  variables:
+    SPRING_PROFILES_ACTIVE: "development"
+    DB_USER: "userservice"
+    JVM_OPTS: "-Xmx1g -Xms512m"
+
+# Deployment configuration
+deployment:
+  enabled: true
+  replicaCount: 2
+
+  # Update strategy
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  # Pod security context
+  securityContext:
+    enabled: true
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+
+  # Main container configuration
+  mainContainer:
+    containerPort: 8080
+
+    # Container security
+    securityContext:
+      enabled: true
+      readOnlyRootFilesystem: false
+      allowPrivilegeEscalation: false
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      capabilities:
+        drop:
+        - ALL
+
+    # Resource management
+    resources:
+      enabled: true
+      requests:
+        cpu: "200m"
+        memory: "512Mi"
+      limits:
+        cpu: "1000m"
+        memory: "1Gi"
+
+    # Health checks
+    livenessProbe:
+      enabled: true
+      httpGet:
+        path: /api/v1/health
+        port: 8080
+      initialDelaySeconds: 60
+      periodSeconds: 30
+      failureThreshold: 3
+
+    readinessProbe:
+      enabled: true
+      httpGet:
+        path: /api/v1/health/ready
+        port: 8080
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      failureThreshold: 3
+
+# Service configuration
+service:
+  enabled: true
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+# Service account (basic)
+serviceAccount:
+  create: false
+
+# Basic pod disruption budget
+podDisruptionBudget:
+  enabled: true
+
+# No autoscaling for basic setup
+autoscaling:
+  enabled: false
+
+# Basic network policy (optional)
+networkPolicy:
+  enabled: false
+
+# No advanced features for basic setup
+ingress:
+  enabled: false
+
+scaledobject:
+  enabled: false
+
+externalService:
+  enabled: false
+
+# Example of additional configmaps (optional)
+# These will be created by Helm if needed
+additionalConfigMaps:
+  logging:
+    enabled: true
+    mountPath: /app/config/logging
+    data:
+      logback-spring.xml: |
+        <?xml version="1.0" encoding="UTF-8"?>
+        <configuration>
+          <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+              <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            </encoder>
+          </appender>
+          <root level="INFO">
+            <appender-ref ref="STDOUT" />
+          </root>
+        </configuration> 

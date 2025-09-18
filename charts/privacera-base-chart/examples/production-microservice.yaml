@@ -1,0 +1,405 @@
+# =============================================================================
+# PRODUCTION MICROSERVICE EXAMPLE
+# =============================================================================
+# This example demonstrates a production-ready microservice with all security,
+# reliability, and observability features enabled.
+#
+# Features demonstrated:
+# - High availability deployment (3 replicas across zones)
+# - Advanced security contexts and network policies
+# - Comprehensive health checks and startup probes
+# - Resource limits and autoscaling
+# - Service account with AWS IAM (IRSA)
+# - Multiple ConfigMaps for different concerns
+# - Pod disruption budget for reliability
+# - Ingress with AWS ALB
+# - Monitoring and logging configuration
+#
+# Usage:
+#   helm install production-app ./chart -f chart/examples/production-microservice.yaml
+# =============================================================================
+
+# Application metadata
+app:
+  name: order-service
+  env: production
+  namespace: privacera
+  version: "2.1.0"
+  labels:
+    team: commerce
+    service-type: api
+    criticality: high
+    cost-center: engineering
+  annotations:
+    deployment.kubernetes.io/revision: "3"
+    service.mesh/inject: "true"
+
+# Container image configuration
+image:
+  hub: 404161567772.dkr.ecr.us-east-1.amazonaws.com
+  repository: privacera/order-service
+  tag: v2.1.0-prod
+  pullPolicy: IfNotPresent
+  pullSecrets:
+  - name: privacera-registry-secret
+
+# Main application configuration
+defaultConfigMap:
+  enabled: true
+  name: app-config
+  mountPath: /app/config
+  data:
+    application-prod.yml: |
+      server:
+        port: 8080
+        servlet:
+          context-path: /api/v1
+        tomcat:
+          max-threads: 200
+          connection-timeout: 20000
+      spring:
+        profiles:
+          active: production
+        datasource:
+          url: jdbc:postgresql://prod-postgres-cluster:5432/orderdb
+          username: ${DB_USER}
+          password: ${DB_PASSWORD}
+          hikari:
+            maximum-pool-size: 20
+            minimum-idle: 5
+            connection-timeout: 30000
+        jpa:
+          hibernate:
+            ddl-auto: validate
+          show-sql: false
+          properties:
+            hibernate:
+              jdbc:
+                batch_size: 20
+      management:
+        endpoints:
+          web:
+            exposure:
+              include: health,info,metrics,prometheus
+        endpoint:
+          health:
+            show-details: when-authorized
+        health:
+          db:
+            enabled: true
+          livenessstate:
+            enabled: true
+          readinessstate:
+            enabled: true
+      logging:
+        level:
+          com.privacera.orderservice: INFO
+          org.springframework.security: WARN
+          org.hibernate.SQL: WARN
+        pattern:
+          console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level [%X{traceId},%X{spanId}] %logger{36} - %msg%n"
+
+# Additional configuration files
+additionalConfigMaps:
+  monitoring-config:
+    enabled: true
+    mountPath: /app/config/monitoring
+    data:
+      micrometer.properties: |
+        # Micrometer metrics configuration
+        management.metrics.export.prometheus.enabled=true
+        management.metrics.distribution.percentiles-histogram.http.server.requests=true
+        management.metrics.distribution.percentiles.http.server.requests=0.5,0.95,0.99
+        management.metrics.tags.application=${spring.application.name}
+        management.metrics.tags.environment=production
+
+  security-config:
+    enabled: true
+    mountPath: /app/config/security
+    data:
+      security.properties: |
+        # Security configuration
+        security.jwt.secret-key=${JWT_SECRET_KEY}
+        security.jwt.expiration=3600
+        security.cors.allowed-origins=https://app.privacera.com,https://admin.privacera.com
+        security.rate-limit.requests-per-minute=1000
+
+# Environment variables
+env:
+  enabled: true
+  variables:
+    SPRING_PROFILES_ACTIVE: "production"
+    JVM_OPTS: "-Xmx3g -Xms2g -XX:+UseG1GC -XX:+UseStringDeduplication -XX:MaxGCPauseMillis=200"
+    OTEL_SERVICE_NAME: "order-service"
+    OTEL_RESOURCE_ATTRIBUTES: "environment=production,service.version=2.1.0"
+
+# Secrets configuration
+secrets:
+  enabled: true
+  data:
+    DB_PASSWORD: "cHJvZC1wYXNzd29yZC0yMDI0" # base64: prod-password-2024
+    JWT_SECRET_KEY: "c3VwZXItc2VjcmV0LWp3dC1rZXktZm9yLXByb2R1Y3Rpb24=" # base64 encoded
+
+# Production deployment configuration
+deployment:
+  enabled: true
+  replicaCount: 3
+
+  # Rolling update strategy for zero-downtime deployments
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  # Topology spread for high availability
+  topologySpreadConstraints:
+    default:
+      enabled: true
+      maxSkew: 1
+      topologyKey: "kubernetes.io/hostname"
+      whenUnsatisfiable: ScheduleAnyway
+    additional:
+      enabled: true
+      constraints:
+      - maxSkew: 1
+        topologyKey: "topology.kubernetes.io/zone"
+        whenUnsatisfiable: DoNotSchedule
+      - maxSkew: 2
+        topologyKey: "node.kubernetes.io/instance-type"
+        whenUnsatisfiable: ScheduleAnyway
+
+  # Node selection for production nodes
+  nodeSelector:
+    node-type: production
+    kubernetes.io/arch: amd64
+
+  # Tolerations for dedicated nodes
+  tolerations:
+  - key: "dedicated"
+    operator: "Equal"
+    value: "commerce"
+    effect: "NoSchedule"
+
+  # Pod security context
+  securityContext:
+    enabled: true
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+
+  # Main container configuration
+  mainContainer:
+    containerPort: 8080
+
+    # Additional ports for metrics
+    ports:
+    - containerPort: 9090
+      name: metrics
+      protocol: TCP
+
+    # Per-container environment
+    envFrom:
+    - secretRef:
+        name: order-service-secret
+    - configMapRef:
+        name: global-config
+        optional: true
+
+    # Container security (hardened)
+    securityContext:
+      enabled: true
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      capabilities:
+        drop:
+        - ALL
+
+    # Production resource allocation
+    resources:
+      enabled: true
+      requests:
+        cpu: "1000m"
+        memory: "2Gi"
+        ephemeral-storage: "1Gi"
+      limits:
+        cpu: "2000m"
+        memory: "4Gi"
+        ephemeral-storage: "5Gi"
+
+    # Comprehensive health checks
+    livenessProbe:
+      enabled: true
+      httpGet:
+        path: /api/v1/actuator/health/liveness
+        port: 8080
+      initialDelaySeconds: 120
+      periodSeconds: 30
+      timeoutSeconds: 10
+      failureThreshold: 3
+
+    readinessProbe:
+      enabled: true
+      httpGet:
+        path: /api/v1/actuator/health/readiness
+        port: 8080
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+
+    startupProbe:
+      enabled: true
+      httpGet:
+        path: /api/v1/actuator/health
+        port: 8080
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 30
+
+    # Lifecycle hooks for graceful shutdown
+    lifecycle:
+      preStop:
+        exec:
+          command: [ "/bin/sh", "-c", "sleep 15" ]
+
+# Service configuration
+service:
+  enabled: true
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: http
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval: "10"
+
+# External service for metrics
+externalService:
+  enabled: true
+  type: ClusterIP
+  port: 9090
+  targetPort: 9090
+  additionalLabels:
+    metrics: "true"
+
+# Service account with AWS IAM role
+serviceAccount:
+  create: true
+  name: "order-service-sa"
+  roleArn: "arn:aws:iam::123456789012:role/OrderServiceProdRole"
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/OrderServiceProdRole"
+  labels:
+    app.kubernetes.io/component: service-account
+
+# Horizontal Pod Autoscaler
+autoscaling:
+  enabled: true
+  replicaCountMin: 3
+  replicaCountMax: 20
+  cpu:
+    averageUtilization: 70
+  memory:
+    averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      selectPolicy: Min
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      - type: Pods
+        value: 2
+        periodSeconds: 30
+      selectPolicy: Max
+
+# Ingress with AWS ALB
+ingress:
+  enabled: true
+  internal: false
+  hostname: "api.privacera.com"
+  certificate:
+    arn: "arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012"
+  group:
+    enabled: true
+    name: "production-alb"
+  path: "/api/v1/orders"
+  pathType: Prefix
+  extraAnnotations:
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /api/v1/actuator/health
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "15"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+
+# Pod Disruption Budget for high availability
+podDisruptionBudget:
+  enabled: true
+
+# Network Policy for security
+networkPolicy:
+  enabled: true
+  policyTypes: [ "Ingress", "Egress" ]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: privacera
+    - namespaceSelector:
+        matchLabels:
+          name: api-gateway
+    - podSelector:
+        matchLabels:
+          app: payment-service
+    ports:
+    - protocol: TCP
+      port: 8080
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9090
+  egress:
+  # Allow DNS
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
+  # Allow database access
+  - to:
+    - podSelector:
+        matchLabels:
+          app: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow external API calls (HTTPS)
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+
+# KEDA for advanced autoscaling (optional)
+scaledobject:
+  enabled: false

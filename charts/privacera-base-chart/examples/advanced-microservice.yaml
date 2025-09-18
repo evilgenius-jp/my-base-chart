@@ -1,0 +1,487 @@
+# =============================================================================
+# ADVANCED MICROSERVICE EXAMPLE
+# =============================================================================
+# This example demonstrates advanced Kubernetes patterns and features including:
+# - Init containers for database migrations and setup
+# - Sidecar containers for logging and monitoring
+# - KEDA scaling based on custom metrics
+# - Multiple ConfigMaps from files and inline data
+# - Advanced networking and security
+# - Complex volume mounting patterns
+#
+# Features demonstrated:
+# - Init containers (DB migration, asset download)
+# - Sidecar containers (Fluentd logging, Metrics exporter)
+# - KEDA ScaledObject with custom triggers
+# - File-based ConfigMaps
+# - Advanced network policies
+# - Complex volume and secret management
+#
+# Usage:
+#   helm install advanced-app ./chart -f chart/examples/advanced-microservice.yaml
+# =============================================================================
+
+# Application metadata
+app:
+  name: analytics-service
+  env: production
+  namespace: privacera
+  version: "1.5.0"
+  labels:
+    team: data-platform
+    service-type: analytics
+    data-classification: sensitive
+    backup-required: "true"
+
+# Container image configuration  
+image:
+  hub: 404161567772.dkr.ecr.us-east-1.amazonaws.com
+  repository: privacera/analytics-service
+  tag: v1.5.0
+  pullPolicy: IfNotPresent
+  pullSecrets:
+  - name: privacera-registry-secret
+
+# Main application configuration
+defaultConfigMap:
+  enabled: true
+  name: app-config
+  mountPath: /app/config
+  # Use files from chart directory (create chart/analytics-configs/ with files)
+  fromFiles:
+    enabled: false # Set to true if you have config files in chart directory
+    path: "analytics-configs/*"
+  data:
+    application.yml: |
+      server:
+        port: 8080
+      spring:
+        profiles:
+          active: production
+        datasource:
+          url: jdbc:postgresql://analytics-db:5432/analytics
+          username: ${DB_USER}
+          password: ${DB_PASSWORD}
+        kafka:
+          bootstrap-servers: kafka-cluster:9092
+          consumer:
+            group-id: analytics-consumer
+            auto-offset-reset: earliest
+      analytics:
+        processing:
+          batch-size: 1000
+          thread-pool-size: 10
+        storage:
+          path: /data/analytics
+        metrics:
+          export-interval: 30s
+
+# Multiple ConfigMaps for different concerns
+additionalConfigMaps:
+  fluentd-config:
+    enabled: true
+    mountPath: /fluentd/etc
+    data:
+      fluent.conf: |
+        <source>
+          @type tail
+          @id input_tail
+          path /app/logs/*.log
+          pos_file /var/log/fluentd/analytics.log.pos
+          tag analytics.logs
+          <parse>
+            @type json
+            time_key timestamp
+            time_format %Y-%m-%dT%H:%M:%S.%L%z
+          </parse>
+        </source>
+
+        <match analytics.**>
+          @type elasticsearch
+          host elasticsearch.logging.svc.cluster.local
+          port 9200
+          index_name analytics-logs
+          type_name _doc
+          include_tag_key true
+          tag_key @log_name
+          flush_interval 1s
+        </match>
+
+  prometheus-config:
+    enabled: true
+    mountPath: /etc/prometheus
+    data:
+      prometheus.yml: |
+        global:
+          scrape_interval: 15s
+        scrape_configs:
+          - job_name: 'analytics-service'
+            static_configs:
+              - targets: ['localhost:8080']
+            metrics_path: /actuator/prometheus
+            scrape_interval: 10s
+
+  migration-scripts:
+    enabled: true
+    mountPath: /migrations
+    data:
+      001_create_tables.sql: |
+        CREATE TABLE IF NOT EXISTS analytics_events (
+          id SERIAL PRIMARY KEY,
+          event_type VARCHAR(100) NOT NULL,
+          event_data JSONB NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          processed BOOLEAN DEFAULT FALSE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_analytics_events_type 
+        ON analytics_events(event_type);
+
+        CREATE INDEX IF NOT EXISTS idx_analytics_events_processed 
+        ON analytics_events(processed) WHERE NOT processed;
+
+      002_add_partitioning.sql: |
+        -- Add partitioning for performance
+        SELECT create_monthly_partitions('analytics_events', '2024-01-01', '2025-12-31');
+
+# Environment variables
+env:
+  enabled: true
+  variables:
+    SPRING_PROFILES_ACTIVE: "production"
+    JVM_OPTS: "-Xmx4g -Xms2g -XX:+UseG1GC -XX:MaxGCPauseMillis=100"
+    KAFKA_CONSUMER_THREADS: "5"
+    ANALYTICS_LOG_LEVEL: "INFO"
+
+# Secrets
+secrets:
+  enabled: true
+  data:
+    DB_PASSWORD: "YW5hbHl0aWNzLXByb2QtcGFzc3dvcmQ=" # base64 encoded
+    KAFKA_API_KEY: "a2Fma2EtYXBpLWtleS1wcm9k" # base64 encoded
+    ELASTICSEARCH_PASSWORD: "ZWxhc3RpYy1wYXNzd29yZA==" # base64 encoded
+
+# Advanced deployment configuration
+deployment:
+  enabled: true
+  replicaCount: 2
+
+  # Update strategy
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  # Advanced topology spreading
+  topologySpreadConstraints:
+    default:
+      enabled: true
+    additional:
+      enabled: true
+      constraints:
+      - maxSkew: 1
+        topologyKey: "topology.kubernetes.io/zone"
+        whenUnsatisfiable: DoNotSchedule
+      - maxSkew: 1
+        topologyKey: "node.kubernetes.io/instance-type"
+        whenUnsatisfiable: ScheduleAnyway
+
+  # Security context
+  securityContext:
+    enabled: true
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+
+  # Init containers for setup tasks
+  initContainers:
+  - name: wait-for-dependencies
+    image: busybox:1.35
+    command: [ "sh", "-c" ]
+    args:
+    - |
+      echo "Waiting for database..."
+      until nc -z analytics-db 5432; do
+        echo "Database not ready, waiting..."
+        sleep 2
+      done
+      echo "Database is ready!"
+
+      echo "Waiting for Kafka..."
+      until nc -z kafka-cluster 9092; do
+        echo "Kafka not ready, waiting..."
+        sleep 2
+      done
+      echo "Kafka is ready!"
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 50m
+        memory: 64Mi
+
+  - name: database-migration
+    image: migrate/migrate:v4.15.2
+    command: [ "migrate" ]
+    args: [ "-path", "/migrations", "-database", "postgres://analytics:${DB_PASSWORD}@analytics-db:5432/analytics?sslmode=disable", "up" ]
+    volumeMounts:
+    - name: migration-scripts
+      mountPath: /migrations
+      readOnly: true
+    env:
+    - name: DB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: analytics-service-secret
+          key: DB_PASSWORD
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+  - name: setup-data-directory
+    image: busybox:1.35
+    command: [ "sh", "-c" ]
+    args: [ "mkdir -p /data/analytics && chown -R 1000:1000 /data" ]
+    securityContext:
+      runAsUser: 0 # Need root for chown
+    volumeMounts:
+    - name: analytics-data
+      mountPath: /data
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+
+  # Main container
+  mainContainer:
+    containerPort: 8080
+
+    # Additional ports
+    ports:
+    - containerPort: 9090
+      name: metrics
+      protocol: TCP
+    - containerPort: 8081
+      name: admin
+      protocol: TCP
+
+    # Container security
+    securityContext:
+      enabled: true
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      capabilities:
+        drop:
+        - ALL
+
+    # Resources for data processing workload
+    resources:
+      enabled: true
+      requests:
+        cpu: "1000m"
+        memory: "2Gi"
+        ephemeral-storage: "2Gi"
+      limits:
+        cpu: "4000m"
+        memory: "8Gi"
+        ephemeral-storage: "10Gi"
+
+    # Health checks
+    livenessProbe:
+      enabled: true
+      httpGet:
+        path: /actuator/health/liveness
+        port: 8080
+      initialDelaySeconds: 120
+      periodSeconds: 30
+      failureThreshold: 3
+
+    readinessProbe:
+      enabled: true
+      httpGet:
+        path: /actuator/health/readiness
+        port: 8080
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      failureThreshold: 3
+
+    startupProbe:
+      enabled: true
+      httpGet:
+        path: /actuator/health
+        port: 8080
+      initialDelaySeconds: 60
+      periodSeconds: 10
+      failureThreshold: 60 # Allow long startup for data processing
+
+  # Sidecar containers
+  additionalContainers:
+  - name: fluentd-sidecar
+    image: fluentd:v1.14-debian
+    imagePullPolicy: IfNotPresent
+    ports:
+    - containerPort: 24224
+      name: forward
+      protocol: TCP
+    env:
+    - name: FLUENTD_CONF
+      value: "fluent.conf"
+    - name: ELASTICSEARCH_HOST
+      value: "elasticsearch.logging.svc.cluster.local"
+    volumeMounts:
+    - name: fluentd-config
+      mountPath: /fluentd/etc
+      readOnly: true
+    - name: app-logs
+      mountPath: /app/logs
+      readOnly: true
+    - name: fluentd-buffer
+      mountPath: /var/log/fluentd
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    securityContext:
+      runAsUser: 1000
+      runAsNonRoot: true
+
+  - name: prometheus-exporter
+    image: prom/node-exporter:latest
+    ports:
+    - containerPort: 9100
+      name: node-metrics
+      protocol: TCP
+    volumeMounts:
+    - name: prometheus-config
+      mountPath: /etc/prometheus
+      readOnly: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+    securityContext:
+      runAsUser: 65534 # nobody user
+      runAsNonRoot: true
+
+# Service configuration
+service:
+  enabled: true
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+# External service for metrics
+externalService:
+  enabled: true
+  type: ClusterIP
+  port: 9090
+  targetPort: 9090
+
+# Service account
+serviceAccount:
+  create: true
+  name: "analytics-service-sa"
+  roleArn: "arn:aws:iam::123456789012:role/AnalyticsServiceRole"
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/AnalyticsServiceRole"
+
+# KEDA autoscaling based on Kafka lag
+scaledobject:
+  enabled: true
+  app:
+    pollingInterval: 30
+    cooldownPeriod: 300
+    minReplicaCount: 2
+    maxReplicaCount: 10
+    idleReplicaCount: 1
+  triggers:
+  - type: kafka
+    metadata:
+      bootstrapServers: kafka-cluster:9092
+      consumerGroup: analytics-consumer
+      topic: analytics-events
+      lagThreshold: "100"
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus:9090
+      metricName: analytics_queue_depth
+      threshold: "50"
+      query: sum(analytics_queue_depth)
+
+# Advanced HPA (fallback if KEDA disabled)
+autoscaling:
+  enabled: false
+
+# Network policy with complex rules
+networkPolicy:
+  enabled: true
+  policyTypes: [ "Ingress", "Egress" ]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: privacera
+    - podSelector:
+        matchLabels:
+          app: api-gateway
+    ports:
+    - protocol: TCP
+      port: 8080
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9090
+    - protocol: TCP
+      port: 9100
+  egress:
+  # DNS
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
+  # Database
+  - to:
+    - podSelector:
+        matchLabels:
+          app: analytics-db
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Kafka
+  - to:
+    - podSelector:
+        matchLabels:
+          app: kafka
+    ports:
+    - protocol: TCP
+      port: 9092
+  # Elasticsearch
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: logging
+    ports:
+    - protocol: TCP
+      port: 9200
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true

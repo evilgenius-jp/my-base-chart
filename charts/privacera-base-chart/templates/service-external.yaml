@@ -1,0 +1,25 @@
+{{- if .Values.externalService.enabled }}
+{{- $globalApp := include "globalApp" . | fromYaml }}
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    {{- include "commonLabels" . | nindent 4 }}
+    {{- if .Values.externalService.additionalLabels }}
+    {{- toYaml .Values.externalService.additionalLabels | nindent 4 }}
+    {{- end }}
+  name: {{ include "fullname" . }}-ext
+  namespace: {{ $globalApp.namespace }}
+  {{- with .Values.externalService.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.externalService.type }}
+  ports:
+  - name: "external"
+    port: {{ .Values.externalService.port }}
+    targetPort: {{ .Values.externalService.targetPort }}
+  selector:
+    {{- include "selectorLabels" . | nindent 4 }}
+{{- end }}

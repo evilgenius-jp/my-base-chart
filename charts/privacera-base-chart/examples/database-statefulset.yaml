@@ -1,0 +1,398 @@
+# Database StatefulSet Example
+# This example demonstrates a StatefulSet configuration for database workloads
+# that require persistent storage and stable network identity
+
+# Override global settings
+nameOverride: "postgres-db"
+fullnameOverride: "postgres-database"
+
+# Workload type selection
+workload:
+  type: "statefulset" # Use StatefulSet instead of Deployment
+
+# Container image configuration
+image:
+  hub: "postgres"
+  repository: "postgres"
+  tag: "15.2"
+  pullPolicy: "IfNotPresent"
+
+# StatefulSet-specific configuration
+statefulset:
+  enabled: true
+  annotations:
+    # Annotations for StatefulSet
+    app.kubernetes.io/component: "database"
+  labels:
+    # Additional labels for StatefulSet
+    app.kubernetes.io/tier: "database"
+    app.kubernetes.io/part-of: "data-platform"
+
+  # StatefulSet configuration
+  serviceName: "postgres-database-headless" # Will be auto-generated if not specified
+  podManagementPolicy: "OrderedReady" # Sequential pod creation
+
+  # Update strategy for StatefulSet
+  updateStrategy:
+    type: "RollingUpdate"
+    rollingUpdate:
+      maxUnavailable: 1
+      # partition: 0  # For canary updates
+
+      # Persistent volume claim templates
+  volumeClaimTemplates:
+  - metadata:
+      name: "postgres-data"
+      annotations:
+        volume.beta.kubernetes.io/storage-class: "gp2"
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "gp2"
+      resources:
+        requests:
+          storage: "50Gi"
+  - metadata:
+      name: "postgres-wal"
+      annotations:
+        volume.beta.kubernetes.io/storage-class: "gp2"
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "gp2"
+      resources:
+        requests:
+          storage: "10Gi"
+
+# Replica configuration
+replicaCount: 3 # PostgreSQL primary + 2 replicas
+
+# Service configuration
+service:
+  enabled: true
+  type: "ClusterIP"
+  port: 5432
+  targetPort: 5432
+  protocol: "TCP"
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+
+  # Headless service (automatically enabled for StatefulSet)
+  headless:
+    enabled: true # Auto-enabled for StatefulSet
+    name: "postgres-database-headless"
+    port: 5432
+    targetPort: 5432
+    protocol: "TCP"
+    publishNotReadyAddresses: true # For peer discovery
+    annotations:
+      service.alpha.kubernetes.io/tolerate-unready-endpoints: "true"
+
+# Environment variables
+env:
+  enabled: true
+  variables:
+    POSTGRES_DB: "application_db"
+    POSTGRES_USER: "app_user"
+    PGDATA: "/var/lib/postgresql/data/pgdata"
+    POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=en_US.UTF-8"
+
+# Secrets (for database credentials)
+secrets:
+  enabled: true
+  data:
+    # Base64 encoded values
+    POSTGRES_PASSWORD: "c3VwZXJzZWNyZXRwYXNzd29yZA==" # supersecretpassword
+    POSTGRES_REPLICATION_PASSWORD: "cmVwbGljYXRpb25wYXNzd29yZA==" # replicationpassword
+
+# Main container configuration
+mainContainer:
+  containerPort: 5432
+  command: []
+  args: []
+
+  # Environment variables from secrets
+  envFrom:
+  - secretRef:
+      name: "postgres-database"
+  # Resource limits and requests
+  resources:
+    enabled: true
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+
+  # Health checks
+  livenessProbe:
+    enabled: true
+    exec:
+      command:
+      - /bin/sh
+      - -c
+      - "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+    successThreshold: 1
+
+  readinessProbe:
+    enabled: true
+    exec:
+      command:
+      - /bin/sh
+      - -c
+      - "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+    successThreshold: 1
+
+  startupProbe:
+    enabled: true
+    exec:
+      command:
+      - /bin/sh
+      - -c
+      - "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30
+    successThreshold: 1
+
+  # Security context
+  securityContext:
+    enabled: true
+    runAsNonRoot: false # PostgreSQL container runs as postgres user
+    runAsUser: 999 # postgres user ID
+    runAsGroup: 999 # postgres group ID
+    readOnlyRootFilesystem: false # PostgreSQL needs write access
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - ALL
+
+# Pod-level security context
+securityContext:
+  enabled: true
+  fsGroup: 999 # postgres group ID
+  runAsNonRoot: false
+  runAsUser: 999
+  runAsGroup: 999
+
+# ConfigMap for PostgreSQL configuration
+defaultConfigMap:
+  enabled: true
+  mountPath: "/etc/postgresql"
+  fromFiles:
+    enabled: false
+  data:
+    postgresql.conf: |
+      # PostgreSQL configuration
+      listen_addresses = '*'
+      port = 5432
+      max_connections = 100
+      shared_buffers = 256MB
+      effective_cache_size = 1GB
+      maintenance_work_mem = 64MB
+      checkpoint_completion_target = 0.9
+      wal_buffers = 16MB
+      default_statistics_target = 100
+      random_page_cost = 1.1
+      effective_io_concurrency = 200
+      work_mem = 4MB
+      min_wal_size = 1GB
+      max_wal_size = 4GB
+
+      # Logging
+      log_destination = 'stderr'
+      logging_collector = on
+      log_directory = '/var/log/postgresql'
+      log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
+      log_rotation_age = 1d
+      log_rotation_size = 10MB
+      log_line_prefix = '%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h '
+      log_checkpoints = on
+      log_connections = on
+      log_disconnections = on
+      log_lock_waits = on
+      log_temp_files = 0
+      log_autovacuum_min_duration = 0
+      log_error_verbosity = default
+
+      # Replication
+      wal_level = replica
+      max_wal_senders = 3
+      wal_keep_segments = 8
+      hot_standby = on
+
+    pg_hba.conf: |
+      # PostgreSQL Client Authentication Configuration File
+      # TYPE  DATABASE        USER            ADDRESS                 METHOD
+
+      # "local" is for Unix domain socket connections only
+      local   all             all                                     trust
+      # IPv4 local connections:
+      host    all             all             127.0.0.1/32            md5
+      # IPv6 local connections:
+      host    all             all             ::1/128                 md5
+      # Allow replication connections from localhost, by a user with the
+      # replication privilege.
+      local   replication     all                                     trust
+      host    replication     all             127.0.0.1/32            md5
+      host    replication     all             ::1/128                 md5
+
+      # Allow connections from pod network
+      host    all             all             10.0.0.0/8              md5
+      host    replication     all             10.0.0.0/8              md5
+
+# Init containers for database setup
+initContainers:
+- name: init-db
+  image: "postgres:15.2"
+  imagePullPolicy: "IfNotPresent"
+  command:
+  - /bin/bash
+  - -c
+  - |
+    set -e
+    echo "Initializing database directories..."
+
+    # Create data directory if it doesn't exist
+    if [ ! -d "/data/postgres-data/pgdata" ]; then
+      echo "Creating PostgreSQL data directory structure..."
+      mkdir -p /data/postgres-data/pgdata
+      mkdir -p /data/postgres-wal
+      chown -R 999:999 /data/postgres-data
+      chown -R 999:999 /data/postgres-wal
+    fi
+
+    echo "Database initialization completed."
+
+  volumeMounts:
+  - name: postgres-data
+    mountPath: /data/postgres-data
+  - name: postgres-wal
+    mountPath: /data/postgres-wal
+
+  securityContext:
+    runAsUser: 0 # Run as root for chown operations
+    runAsGroup: 0
+    capabilities:
+      add:
+      - CHOWN
+      - FOWNER
+
+# Service Account
+serviceAccount:
+  enabled: true
+  create: true
+  name: "postgres-database-sa"
+  annotations:
+    # AWS IAM role for service account (if using IRSA)
+    eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/postgres-service-role"
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  spec:
+    minAvailable: 1 # Keep at least 1 pod available during disruptions
+
+# Network Policy
+networkPolicy:
+  enabled: true
+  policyTypes: [ "Ingress", "Egress" ]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: "application-backend"
+    - namespaceSelector:
+        matchLabels:
+          name: "applications"
+    ports:
+    - protocol: TCP
+      port: 5432
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: "postgres-database" # Allow pod-to-pod communication
+    ports:
+    - protocol: TCP
+      port: 5432
+  egress:
+  - to: [] # Allow DNS queries
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: "postgres-database" # Allow pod-to-pod communication
+    ports:
+    - protocol: TCP
+      port: 5432
+
+# Node selection
+nodeSelector:
+  node.kubernetes.io/instance-type: "r5.xlarge" # Memory-optimized instances
+  topology.kubernetes.io/zone: "us-west-2a"
+
+# Tolerations for dedicated database nodes
+tolerations:
+- key: "database"
+  operator: "Equal"
+  value: "postgres"
+  effect: "NoSchedule"
+
+# Pod affinity/anti-affinity
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: "postgres-database"
+      topologyKey: "kubernetes.io/hostname"
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      preference:
+        matchExpressions:
+        - key: "node.kubernetes.io/instance-type"
+          operator: In
+          values:
+          - "r5.xlarge"
+          - "r5.2xlarge"
+
+# Topology spread constraints
+topologySpreadConstraints:
+  default:
+    enabled: true
+    maxSkew: 1
+    topologyKey: "topology.kubernetes.io/zone"
+    whenUnsatisfiable: "DoNotSchedule"
+  additional:
+    enabled: true
+    constraints:
+    - maxSkew: 1
+      topologyKey: "kubernetes.io/hostname"
+      whenUnsatisfiable: "DoNotSchedule"
+
+# Graceful shutdown
+terminationGracePeriodSeconds: 120 # Allow time for graceful PostgreSQL shutdown
+
+# Monitoring and observability
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9187"
+  prometheus.io/path: "/metrics"
+
+podLabels:
+  app.kubernetes.io/component: "database"
+  app.kubernetes.io/part-of: "data-platform"

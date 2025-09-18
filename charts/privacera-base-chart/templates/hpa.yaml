@@ -1,0 +1,37 @@
+{{- $globalAutoscaling := include "globalAutoscaling" . | fromYaml }}
+{{- if $globalAutoscaling.enabled }}
+{{- $globalApp := include "globalApp" . | fromYaml }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "fullname" . }}
+  namespace: {{ $globalApp.namespace }}
+  labels:
+    {{- include "commonLabels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "fullname" . }}
+  minReplicas: {{ $globalAutoscaling.minReplicas }}
+  maxReplicas: {{ $globalAutoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $globalAutoscaling.targetCPUUtilizationPercentage }}
+    {{- if $globalAutoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ $globalAutoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+  {{- if $globalAutoscaling.behavior }}
+  behavior:
+    {{- toYaml $globalAutoscaling.behavior | nindent 4 }}
+  {{- end }}
+{{- end }}

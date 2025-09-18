@@ -1,0 +1,79 @@
+{{- if .Values.service.enabled }}
+{{- $globalApp := include "globalApp" . | fromYaml }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.service.name | default (include "fullname" .) }}
+  namespace: {{ $globalApp.namespace }}
+  labels:
+    {{- include "commonLabels" . | nindent 4 }}
+    {{- with .Values.service.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- $global := dict }}
+  {{- if .Values.global }}
+    {{- $global = .Values.global.service | default dict }}
+  {{- end }}
+  {{- $local := .Values.service | default dict -}}
+  {{- $merged := merge $global $local -}}
+  {{- $mergedAnnotations := merge ($merged.annotations | default dict) ($global.annotations | default dict) }}
+  {{- if $mergedAnnotations }}
+  annotations:
+    {{- range $key, $value := $mergedAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+  {{- end }}
+spec:
+  type: {{ $merged.type | default "ClusterIP" }}
+  {{- if .Values.service.clusterIP }}
+  clusterIP: {{ .Values.service.clusterIP }}
+  {{- end }}
+  {{- if $merged.ports }}
+  ports:
+    {{- toYaml $merged.ports | nindent 4 }}
+  {{- else }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: {{ .Values.service.protocol }}
+      name: http
+  {{- end }}
+  selector:
+    {{- include "selectorLabels" . | nindent 4 }}
+{{- end }}
+---
+{{- if .Values.service.headless.enabled }}
+{{- $globalApp := include "globalApp" . | fromYaml }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.service.headless.name | default (printf "%s-headless" (include "fullname" .)) }}
+  namespace: {{ $globalApp.namespace }}
+  labels:
+    {{- include "commonLabels" . | nindent 4 }}
+    {{- with .Values.service.headless.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.service.headless.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: {{ .Values.service.headless.publishNotReadyAddresses }}
+  ports:
+    - port: {{ .Values.service.headless.port }}
+      targetPort: {{ .Values.service.headless.targetPort }}
+      protocol: {{ .Values.service.headless.protocol }}
+      name: http
+    {{- if .Values.service.headless.ports }}
+    {{- range .Values.service.headless.ports }}
+    - port: {{ .port }}
+      targetPort: {{ .targetPort }}
+      protocol: {{ .protocol }}
+      name: {{ .name }}
+    {{- end }}
+    {{- end }}
+  selector:
+    {{- include "selectorLabels" . | nindent 4 }}
+{{- end }}

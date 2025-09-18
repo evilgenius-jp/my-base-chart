@@ -1,0 +1,685 @@
+# ==========================================
+# PRIVACERA HELM CHART - STATEFULSET VALUES
+# ==========================================
+
+# This file provides comprehensive StatefulSet configurations and examples.
+# Copy sections from this file to your actual values.yaml when deploying stateful applications.
+# For StatefulSet deployments: set deployment.enabled=false and statefulset.enabled=true
+
+# ==========================================
+# 🎯 HIGH PRIORITY - CORE CONFIGURATION
+# ==========================================
+
+# Application Identity
+app:
+  name: "postgres-db" # Application name used for labels and resource naming
+  namespace: "database" # Kubernetes namespace for deployment
+  version: "" # Application version (optional, uses chart appVersion if empty)
+  labels: {} # Additional labels applied to all resources
+  annotations: {} # Additional annotations applied to all resources
+
+# Container Image
+image:
+  hub: "postgres" # Container registry URL
+  repository: "postgres" # Image repository name
+  tag: "15.2" # Image tag
+  pullPolicy: IfNotPresent # Image pull policy (Always, IfNotPresent, Never)
+  pullSecrets: [] # Image pull secrets for private registries
+
+# Workload Type Selection (StatefulSet Focus)
+deployment:
+  enabled: false # DISABLE deployment for StatefulSet workloads
+
+statefulset:
+  enabled: true # ENABLE StatefulSet creation
+  annotations: {} # Annotations for StatefulSet metadata
+  labels: {} # Additional labels for StatefulSet
+
+  # StatefulSet-specific configuration
+  serviceName: "" # Headless service name (auto-generated: "fullname-headless")
+  podManagementPolicy: "OrderedReady" # Pod creation policy: "OrderedReady" or "Parallel"
+  # OrderedReady: Pods created sequentially (0→1→2) - safer for databases
+  # Parallel: All pods created simultaneously - faster when order doesn't matter
+
+  # StatefulSet update strategy
+  updateStrategy:
+    type: "RollingUpdate" # Update strategy: "RollingUpdate" or "OnDelete"
+    rollingUpdate:
+      maxUnavailable: 1 # Maximum pods unavailable during update (no maxSurge in StatefulSet)
+      # partition: 0 # Only update pods with ordinal >= partition (for canary updates)
+
+      # 🗄️ PERSISTENT STORAGE - CRITICAL FOR STATEFULSETS
+  volumeClaimTemplates: []
+  # EXAMPLES - Choose one pattern:
+
+  # Single Data Volume (Simple)
+  # volumeClaimTemplates:
+  #   - metadata:
+  #       name: "data"
+  #     spec:
+  #       accessModes: ["ReadWriteOnce"]
+  #       storageClassName: "gp2"
+  #       resources:
+  #         requests:
+  #           storage: "100Gi"
+
+  # Multi-Volume Setup (Database Recommended)
+  # volumeClaimTemplates:
+  #   - metadata:
+  #       name: "data"        # Main data directory
+  #       annotations:
+  #         volume.beta.kubernetes.io/storage-class: "gp2"
+  #     spec:
+  #       accessModes: ["ReadWriteOnce"]
+  #       storageClassName: "gp2"
+  #       resources:
+  #         requests:
+  #           storage: "100Gi"
+  #   - metadata:
+  #       name: "wal"         # Write-Ahead Log (high IOPS)
+  #     spec:
+  #       accessModes: ["ReadWriteOnce"]
+  #       storageClassName: "io1"  # High IOPS storage class
+  #       resources:
+  #         requests:
+  #           storage: "20Gi"
+  #   - metadata:
+  #       name: "logs"        # Application logs
+  #     spec:
+  #       accessModes: ["ReadWriteOnce"]
+  #       storageClassName: "gp2"
+  #       resources:
+  #         requests:
+  #           storage: "10Gi"
+
+  # Replica Configuration
+replicaCount: 3 # Number of pod replicas (recommended: odd numbers for consensus)
+terminationGracePeriodSeconds: 120 # Extended time for graceful database shutdown
+
+# ==========================================
+# 🔧 MEDIUM PRIORITY - CONTAINER CONFIGURATION
+# ==========================================
+
+# Main Container
+mainContainer:
+  # Container startup
+  command: [] # Override container entrypoint (optional)
+  args: [] # Command arguments (optional)
+
+  # Container ports
+  containerPort: 5432 # Primary port (adjust for your database)
+  ports: []
+  # Additional ports example:
+  # ports:
+  #   - containerPort: 9187
+  #     name: metrics
+  #     protocol: TCP
+
+  # Per-container environment
+  envFrom: []
+  # Example:
+  # envFrom:
+  #   - secretRef:
+  #       name: database-credentials
+  #   - configMapRef:
+  #       name: database-config
+
+  # Container security (databases often need specific settings)
+  securityContext:
+    enabled: true
+    readOnlyRootFilesystem: false # Databases typically need write access
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true # Set to false for certain database containers if needed
+    runAsUser: 999 # Database user ID (adjust per application)
+    runAsGroup: 999
+    capabilities:
+      drop:
+      - ALL
+
+  # Container lifecycle
+  lifecycle: {}
+
+# Resource Management (Generous for databases)
+resources:
+  enabled: true
+  requests:
+    cpu: "500m" # Minimum CPU for database workloads
+    memory: 2Gi # Minimum memory
+  limits:
+    cpu: "2000m" # Maximum CPU (2 cores)
+    memory: 4Gi # Maximum memory (increase for production databases)
+
+# Health Checks (Database-specific)
+livenessProbe:
+  enabled: true
+  # Database-specific probe examples:
+  exec:
+    command:
+    - /bin/sh
+    - -c
+    - "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"
+  # Alternative HTTP probe:
+  # httpGet:
+  #   path: /health
+  #   port: 8080
+  initialDelaySeconds: 30 # Allow time for database initialization
+  periodSeconds: 30
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  exec:
+    command:
+    - /bin/sh
+    - -c
+    - "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 3
+
+startupProbe:
+  enabled: true
+  exec:
+    command:
+    - /bin/sh
+    - -c
+    - "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 30 # Allow more time for database initialization
+
+# ==========================================
+# 📂 CONFIGURATION & SECRETS MANAGEMENT
+# ==========================================
+
+# Default ConfigMap (Database configuration)
+defaultConfigMap:
+  enabled: true
+  name: ""
+  mountPath: "/etc/postgresql" # Database config directory
+  annotations: {}
+  labels: {}
+
+  fromFiles:
+    enabled: false
+    path: "configs/*"
+
+  # Database configuration example
+  data: {}
+  # PostgreSQL example:
+  # data:
+  #   postgresql.conf: |
+  #     # PostgreSQL Configuration
+  #     listen_addresses = '*'
+  #     port = 5432
+  #     max_connections = 100
+  #     shared_buffers = 256MB
+  #     effective_cache_size = 1GB
+  #     # Replication settings
+  #     wal_level = replica
+  #     max_wal_senders = 3
+  #     hot_standby = on
+  #   pg_hba.conf: |
+  #     # PostgreSQL Client Authentication
+  #     local   all             all                                     trust
+  #     host    all             all             127.0.0.1/32            md5
+  #     host    all             all             ::1/128                 md5
+  #     host    replication     all             10.0.0.0/8              md5
+  #     host    all             all             10.0.0.0/8              md5
+
+  # Additional ConfigMaps (Modular configuration)
+additionalConfigMaps: {}
+# Database initialization scripts example:
+# additionalConfigMaps:
+#   init-scripts:
+#     enabled: true
+#     mountPath: "/docker-entrypoint-initdb.d"
+#     data:
+#       01-init-database.sql: |
+#         CREATE DATABASE application_db;
+#         CREATE USER app_user WITH PASSWORD 'secure_password';
+#         GRANT ALL PRIVILEGES ON DATABASE application_db TO app_user;
+#       02-create-tables.sql: |
+#         \c application_db;
+#         CREATE TABLE users (
+#           id SERIAL PRIMARY KEY,
+#           username VARCHAR(50) UNIQUE NOT NULL,
+#           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#         );
+#   monitoring-config:
+#     enabled: true
+#     mountPath: "/etc/monitoring"
+#     data:
+#       postgres_exporter.yml: |
+#         queries:
+#           - name: pg_stats
+#             query: "SELECT datname, numbackends FROM pg_stat_database"
+#             metrics:
+#               - datname: {usage: LABEL, description: "Database name"}
+#               - numbackends: {usage: GAUGE, description: "Number of backends"}
+
+# Secrets Management (Database credentials)
+secrets:
+  enabled: true
+  data: {}
+  # Example database credentials (base64 encoded):
+  # data:
+  #   POSTGRES_PASSWORD: "c3VwZXJzZWNyZXRwYXNzd29yZA=="  # supersecretpassword
+  #   POSTGRES_REPLICATION_PASSWORD: "cmVwbGljYXRpb25wYXNzd29yZA=="  # replicationpassword
+  #   DATABASE_URL: "cG9zdGdyZXNxbDovL3VzZXI6cGFzc3dvcmRAaG9zdDo1NDMyL2RibmFtZQ=="
+
+  # Environment Variables (Database settings)
+env:
+  enabled: true
+  variables: {}
+  # PostgreSQL example:
+  # variables:
+  #   POSTGRES_DB: "application_db"
+  #   POSTGRES_USER: "app_user"
+  #   PGDATA: "/var/lib/postgresql/data/pgdata"
+  #   POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=en_US.UTF-8"
+
+  # ==========================================
+  # 🌐 NETWORKING & SERVICE CONFIGURATION
+  # ==========================================
+
+  # Regular Service (for client connections)
+service:
+  enabled: true
+  name: ""
+  type: ClusterIP # Usually ClusterIP for internal database access
+  port: 5432 # Database port
+  targetPort: 5432
+  protocol: TCP
+  ports: []
+  annotations: {}
+  labels: {}
+
+  # Headless Service (REQUIRED for StatefulSets)
+  headless:
+    enabled: true # REQUIRED for StatefulSets
+    name: "" # Auto-generated as "fullname-headless"
+    port: 5432
+    targetPort: 5432
+    protocol: TCP
+    ports: []
+    # Additional ports example:
+    # ports:
+    #   - name: metrics
+    #     port: 9187
+    #     targetPort: 9187
+    #     protocol: TCP
+    annotations: {}
+    labels: {}
+    publishNotReadyAddresses: true # Include not-ready pods for peer discovery
+
+# External Service (optional)
+externalService:
+  enabled: false
+  name: ""
+  type: ClusterIP
+  port: 5432
+  targetPort: 5432
+  protocol: TCP
+  annotations: {}
+  labels: {}
+
+# Ingress (typically not used for databases)
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []
+
+# ==========================================
+# 📂 CONFIGURATION MANAGEMENT
+# ==========================================
+
+# ConfigMaps for StatefulSet Applications
+configMaps:
+
+  # Simple configuration for database settings
+  app-config:
+    enabled: false
+    mountPath: "/app/config"
+    defaultFileName: "database.properties"
+    
+    # Database configuration properties (example)
+    # postgres.db.name: "myapp"
+    # postgres.db.user: "appuser"
+    # postgres.max.connections: "100"
+
+  # Advanced configuration with multiple files (example)
+  # database-config:
+  #   enabled: true
+  #   mountPath: "/etc/postgresql/conf.d"
+  #   
+  #   data:
+  #     "postgresql.conf": |
+  #       listen_addresses = '*'
+  #       port = 5432
+  #       max_connections = 200
+  #       shared_buffers = 256MB
+  #       
+  #     "init-db.sql": |
+  #       -- Database initialization
+  #       CREATE DATABASE myapp;
+  #       CREATE USER appuser WITH PASSWORD 'password';
+
+# ==========================================
+# 🔐 SECURITY CONFIGURATION
+# ==========================================
+
+# Pod Security Context (Database-specific)
+securityContext:
+  enabled: true
+  fsGroup: 999 # Database file system group
+  runAsNonRoot: true
+  runAsUser: 999 # Database user
+  runAsGroup: 999
+
+# Service Account (for RBAC and cloud IAM)
+serviceAccount:
+  enabled: true
+  create: true
+  name: ""
+  annotations: {}
+  # AWS IRSA example:
+  # annotations:
+  #   eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/database-service-role"
+
+  # Network Security (Database protection)
+networkPolicy:
+  enabled: true
+  policyTypes: [ "Ingress", "Egress" ]
+  ingress:
+  # Allow from application pods
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: "application-backend"
+    - namespaceSelector:
+        matchLabels:
+          name: "applications"
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow inter-pod communication (for replication)
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: "postgres-database"
+    ports:
+    - protocol: TCP
+      port: 5432
+  egress:
+  # Allow DNS queries
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
+  # Allow inter-pod communication
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: "postgres-database"
+    ports:
+    - protocol: TCP
+      port: 5432
+
+# ==========================================
+# 📊 SCALING & HIGH AVAILABILITY
+# ==========================================
+
+# HPA (use with caution for StatefulSets)
+autoscaling:
+  enabled: false # Generally not recommended for StatefulSets
+  minReplicas: 3
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# KEDA (advanced autoscaling for StatefulSets)
+scaledobject:
+  enabled: false # Use carefully with StatefulSets
+  app:
+    type: "StatefulSet"
+    version: "apps/v1"
+    pollingInterval: 30
+    cooldownPeriod: 300
+    minReplicaCount: 3
+    maxReplicaCount: 5
+  triggers: []
+  # Example queue-based scaling:
+  # triggers:
+  #   - type: postgresql
+  #     metadata:
+  #       connectionString: "postgresql://user:password@host:5432/dbname"
+  #       query: "SELECT COUNT(*) FROM job_queue WHERE status = 'pending'"
+  #       targetQueryValue: "10"
+
+  # Pod Disruption Budget (Important for databases)
+podDisruptionBudget:
+  enabled: true
+  spec: {}
+  # Database-specific PDB:
+  # spec:
+  #   minAvailable: 1  # Keep at least 1 pod available during disruptions
+
+  # ==========================================
+  # 🎯 ADVANCED SCHEDULING & PLACEMENT
+  # ==========================================
+
+  # Pod Distribution (Important for database HA)
+topologySpreadConstraints:
+  default:
+    enabled: true
+    maxSkew: 1
+    topologyKey: "kubernetes.io/hostname"
+    whenUnsatisfiable: "DoNotSchedule" # Stricter for StatefulSets
+  additional:
+    enabled: false
+
+# Node Selection (Databases benefit from dedicated nodes)
+nodeSelector: {}
+# Example for database workloads:
+# nodeSelector:
+#   node.kubernetes.io/instance-type: "r5.xlarge"  # Memory-optimized
+#   topology.kubernetes.io/zone: "us-west-2a"
+
+# Tolerations (For dedicated database nodes)
+tolerations: []
+# Example:
+# tolerations:
+#   - key: "database"
+#     operator: "Equal"
+#     value: "postgres"
+#     effect: "NoSchedule"
+
+# Advanced Scheduling (Database high availability)
+affinity: {}
+# Example anti-affinity:
+# affinity:
+#   podAntiAffinity:
+#     requiredDuringSchedulingIgnoredDuringExecution:
+#       - labelSelector:
+#           matchLabels:
+#             app.kubernetes.io/name: postgres-database
+#         topologyKey: "kubernetes.io/hostname"
+#   nodeAffinity:
+#     preferredDuringSchedulingIgnoredDuringExecution:
+#       - weight: 100
+#         preference:
+#           matchExpressions:
+#             - key: "node.kubernetes.io/instance-type"
+#               operator: In
+#               values:
+#                 - "r5.xlarge"
+#                 - "r5.2xlarge"
+
+# ==========================================
+# 🔧 ADVANCED CONTAINER PATTERNS
+# ==========================================
+
+# Init Containers (Database setup)
+initContainers: []
+# Example database initialization:
+# initContainers:
+#   - name: init-db-permissions
+#     image: "postgres:15"
+#     imagePullPolicy: "IfNotPresent"
+#     command:
+#       - /bin/bash
+#       - -c
+#       - |
+#         set -e
+#         echo "Setting up database directories..."
+#         mkdir -p /data/postgres/data /data/postgres/wal
+#         chown -R 999:999 /data/postgres
+#         chmod 700 /data/postgres/data
+#         echo "Database directory setup completed."
+#     volumeMounts:
+#       - name: data
+#         mountPath: /data/postgres/data
+#       - name: wal
+#         mountPath: /data/postgres/wal
+#     securityContext:
+#       runAsUser: 0
+#       runAsGroup: 0
+#       capabilities:
+#         add:
+#           - CHOWN
+#           - FOWNER
+
+# Additional Containers (Database sidecars)
+additionalContainers: []
+# Example monitoring sidecar:
+# additionalContainers:
+#   - name: postgres-exporter
+#     image: "prometheuscommunity/postgres-exporter:v0.12.1"
+#     imagePullPolicy: "IfNotPresent"
+#     ports:
+#       - containerPort: 9187
+#         name: metrics
+#         protocol: TCP
+#     env:
+#       - name: DATA_SOURCE_NAME
+#         value: "postgresql://postgres:password@localhost:5432/postgres?sslmode=disable"
+#     resources:
+#       limits:
+#         memory: "128Mi"
+#         cpu: "100m"
+#       requests:
+#         memory: "64Mi"
+#         cpu: "50m"
+
+# ==========================================
+# 📈 MONITORING & OBSERVABILITY
+# ==========================================
+
+# Pod Annotations (Monitoring integration)
+podAnnotations: {}
+# Prometheus example:
+# podAnnotations:
+#   prometheus.io/scrape: "true"
+#   prometheus.io/port: "9187"
+#   prometheus.io/path: "/metrics"
+
+# Pod Labels
+podLabels: {}
+
+# Example:
+# podLabels:
+#   app.kubernetes.io/component: "database"
+#   app.kubernetes.io/part-of: "data-platform"
+
+# ==========================================
+# 📝 DATABASE EXAMPLES
+# ==========================================
+
+# Example 1: PostgreSQL Database
+# -------------------------------
+# app:
+#   name: "postgres-primary"
+#   namespace: "database"
+# image:
+#   hub: "postgres"
+#   repository: "postgres"
+#   tag: "15.2"
+# replicaCount: 3
+# statefulset:
+#   volumeClaimTemplates:
+#     - metadata:
+#         name: "postgres-data"
+#       spec:
+#         accessModes: ["ReadWriteOnce"]
+#         storageClassName: "gp2"
+#         resources:
+#           requests:
+#             storage: "100Gi"
+# mainContainer:
+#   containerPort: 5432
+# env:
+#   variables:
+#     POSTGRES_DB: "application_db"
+#     POSTGRES_USER: "app_user"
+#     PGDATA: "/var/lib/postgresql/data/pgdata"
+
+# Example 2: MongoDB Replica Set
+# ------------------------------
+# app:
+#   name: "mongodb-replica"
+#   namespace: "database"
+# image:
+#   hub: "mongo"
+#   repository: "mongo"
+#   tag: "6.0"
+# replicaCount: 3
+# statefulset:
+#   volumeClaimTemplates:
+#     - metadata:
+#         name: "mongodb-data"
+#       spec:
+#         accessModes: ["ReadWriteOnce"]
+#         storageClassName: "gp2"
+#         resources:
+#           requests:
+#             storage: "50Gi"
+# mainContainer:
+#   containerPort: 27017
+#   command: ["mongod"]
+#   args: ["--replSet", "rs0", "--bind_ip_all"]
+
+# Example 3: Redis Cluster
+# -------------------------
+# app:
+#   name: "redis-cluster"
+#   namespace: "cache"
+# image:  
+#   hub: "redis"
+#   repository: "redis"
+#   tag: "7.0-alpine"
+# replicaCount: 6
+# statefulset:
+#   volumeClaimTemplates:
+#     - metadata:
+#         name: "redis-data"
+#       spec:
+#         accessModes: ["ReadWriteOnce"]
+#         storageClassName: "gp2"
+#         resources:
+#           requests:
+#             storage: "10Gi"
+# mainContainer:
+#   containerPort: 6379
+#   command: ["redis-server"]
+#   args: ["--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf"] 
